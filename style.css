@@ -1,0 +1,262 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: transparent;
+    font-family: 'Segoe UI', sans-serif;
+}
+
+body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.pet-wrapper {
+    position: relative;
+    width: 300px;
+    height: 500px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.pet-body {
+    position: relative;
+    width: 220px;
+    height: 320px;
+}
+
+/* Head */
+.pet-head {
+    width: 130px;
+    height: 130px;
+    background: radial-gradient(circle at 40% 40%, #ffe066, #ffc107);
+    border-radius: 50%;
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 2;
+    animation: float 3s ease-in-out infinite;
+}
+
+@keyframes float {
+    0%, 100% { transform: translateX(-50%) translateY(0); }
+    50% { transform: translateX(-50%) translateY(-8px); }
+}
+
+/* Eyes */
+.eye {
+    width: 18px;
+    height: 18px;
+    background: #333;
+    border-radius: 50%;
+    position: absolute;
+    top: 45px;
+    animation: blink 5s ease-in-out infinite;
+}
+
+.eye::after {
+    content: '';
+    width: 6px;
+    height: 6px;
+    background: white;
+    border-radius: 50%;
+    position: absolute;
+    top: 3px;
+    right: 3px;
+}
+
+.eye.left { left: 30px; }
+.eye.right { right: 30px; }
+
+@keyframes blink {
+    0%, 85%, 100% { transform: scaleY(1); }
+    90% { transform: scaleY(0.1); }
+}
+
+/* Mouth */
+.mouth {
+    width: 20px;
+    height: 10px;
+    border-bottom: 3px solid #333;
+    border-radius: 0 0 50% 50%;
+    position: absolute;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    transition: all 0.3s ease;
+}
+
+/* Cheeks */
+.cheek {
+    width: 22px;
+    height: 14px;
+    background: rgba(255, 130, 130, 0.6);
+    border-radius: 50%;
+    position: absolute;
+    top: 60px;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.cheek.left { left: 12px; }
+.cheek.right { right: 12px; }
+
+/* Torso */
+.pet-torso {
+    width: 90px;
+    height: 70px;
+    background: radial-gradient(circle at 50% 30%, #ffc107, #ff9800);
+    border-radius: 50% 50% 45% 45%;
+    position: absolute;
+    top: 115px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+/* Fan */
+.fan-container {
+    width: 150px;
+    height: 150px;
+    position: absolute;
+    top: 140px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 3;
+}
+
+.fan-guard {
+    width: 100%;
+    height: 100%;
+    border: 4px solid rgba(100, 100, 100, 0.5);
+    border-radius: 50%;
+    position: absolute;
+}
+
+.fan-blades {
+    width: 100%;
+    height: 100%;
+    position: relative;
+}
+
+.blade {
+    width: 60px;
+    height: 25px;
+    background: linear-gradient(90deg, rgba(100, 180, 255, 0.8), rgba(150, 210, 255, 0.6));
+    position: absolute;
+    border-radius: 50%;
+}
+
+.blade-1 { top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(0deg) translateX(-30px); }
+.blade-2 { top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(120deg) translateX(-30px); }
+.blade-3 { top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(240deg) translateX(-30px); }
+
+.center-dot {
+    width: 20px;
+    height: 20px;
+    background: rgba(80, 160, 240, 0.9);
+    border-radius: 50%;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+/* Spin animations */
+.fan-blades.spinning {
+    animation: spin 0.8s linear infinite;
+}
+
+.fan-blades.speed-low {
+    animation: spin 2s linear infinite;
+}
+
+.fan-blades.speed-high {
+    animation: spin 0.3s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Controls */
+.controls {
+    display: flex;
+    gap: 15px;
+    margin-top: 20px;
+}
+
+.btn {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.2);
+    backdrop-filter: blur(5px);
+    font-size: 22px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn:hover {
+    background: rgba(255, 255, 255, 0.4);
+    transform: scale(1.1);
+}
+
+.btn.active {
+    background: rgba(76, 175, 80, 0.6);
+    border-color: rgba(255, 255, 255, 0.9);
+}
+
+/* Status bar */
+.status-bar {
+    margin-top: 15px;
+    text-align: center;
+    color: white;
+}
+
+.speed-label {
+    font-size: 16px;
+    font-weight: bold;
+    text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.5);
+    margin-bottom: 8px;
+}
+
+.battery-bar {
+    width: 120px;
+    height: 12px;
+    border: 2px solid rgba(255, 255, 255, 0.7);
+    border-radius: 6px;
+    overflow: hidden;
+    margin: 0 auto;
+}
+
+.battery-level {
+    height: 100%;
+    width: 80%;
+    background: linear-gradient(90deg, #4CAF50, #66BB6A);
+    transition: width 0.5s ease, background 0.5s ease;
+}
+
+/* Happy state */
+.pet-wrapper.happy .mouth {
+    height: 16px;
+    border-bottom-width: 4px;
+}
+
+.pet-wrapper.happy .cheek {
+    opacity: 0.8;
+}

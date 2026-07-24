@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Fan Pet</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body {
+    width:100%; height:100%;
+    background:transparent;
+    overflow:hidden;
+    font-family:'Segoe UI',sans-serif;
+    user-select:none;
+}
+body {
+    display:flex; justify-content:center; align-items:center;
+    filter: drop-shadow(0 2px 8px rgba(0,0,0,0.3));
+}
+.pet-wrapper {
+    position:relative; width:280px; height:480px;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+}
+.pet-body { position:relative; width:200px; height:300px; }
+
+/* Head */
+.pet-head {
+    width:120px; height:120px;
+    background:radial-gradient(circle at 40% 40%,#ffe066,#ffc107);
+    border-radius:50%;
+    position:absolute; top:0; left:50%; transform:translateX(-50%); z-index:2;
+    animation:float 3s ease-in-out infinite;
+}
+@keyframes float {
+    0%,100%{transform:translateX(-50%) translateY(0)}
+    50%{transform:translateX(-50%) translateY(-8px)}
+}
+.eye {
+    width:16px; height:16px; background:#333; border-radius:50%;
+    position:absolute; top:40px; animation:blink 5s ease-in-out infinite;
+}
+.eye::after {
+    content:''; width:5px; height:5px; background:white; border-radius:50%;
+    position:absolute; top:3px; right:3px;
+}
+.eye.left { left:28px; }
+.eye.right { right:28px; }
+@keyframes blink {
+    0%,85%,100%{transform:scaleY(1)}90%{transform:scaleY(0.1)}
+}
+.mouth {
+    width:18px; height:9px; border-bottom:3px solid #333; border-radius:0 0 50% 50%;
+    position:absolute; bottom:28px; left:50%; transform:translateX(-50%); transition:all .3s;
+}
+.cheek {
+    width:20px; height:12px; background:rgba(255,130,130,.6); border-radius:50%;
+    position:absolute; top:55px; opacity:0; transition:opacity .3s;
+}
+.cheek.left { left:10px; }
+.cheek.right { right:10px; }
+
+/* Torso */
+.pet-torso {
+    width:85px; height:65px;
+    background:radial-gradient(circle at 50% 30%,#ffc107,#ff9800);
+    border-radius:50% 50% 45% 45%;
+    position:absolute; top:110px; left:50%; transform:translateX(-50%);
+}
+
+/* Fan */
+.fan-container {
+    width:140px; height:140px;
+    position:absolute; top:130px; left:50%; transform:translateX(-50%); z-index:3;
+}
+.fan-guard {
+    width:100%; height:100%; border:3px solid rgba(100,100,100,.5); border-radius:50%; position:absolute;
+}
+.fan-blades { width:100%; height:100%; position:relative; }
+.blade {
+    width:55px; height:22px;
+    background:linear-gradient(90deg,rgba(100,180,255,.8),rgba(150,210,255,.6));
+    position:absolute; border-radius:50%;
+}
+.blade-1 { top:50%; left:50%; transform:translate(-50%,-50%) rotate(0deg) translateX(-28px); }
+.blade-2 { top:50%; left:50%; transform:translate(-50%,-50%) rotate(120deg) translateX(-28px); }
+.blade-3 { top:50%; left:50%; transform:translate(-50%,-50%) rotate(240deg) translateX(-28px); }
+.center-dot {
+    width:18px; height:18px; background:rgba(80,160,240,.9); border-radius:50%;
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+}
+.fan-blades.spinning { animation:spin .8s linear infinite; }
+.fan-blades.speed-low { animation:spin 2s linear infinite; }
+.fan-blades.speed-high { animation:spin .3s linear infinite; }
+@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+
+/* Controls */
+.controls { display:flex; gap:12px; margin-top:18px; }
+.btn {
+    width:46px; height:46px; border-radius:50%;
+    border:2px solid rgba(255,255,255,.6); background:rgba(255,255,255,.2);
+    font-size:20px; cursor:pointer; transition:all .2s;
+    display:flex; align-items:center; justify-content:center;
+    color:white; text-shadow:0 1px 3px rgba(0,0,0,.5);
+}
+.btn:hover { background:rgba(255,255,255,.4); transform:scale(1.1); }
+.btn.active { background:rgba(76,175,80,.6); border-color:rgba(255,255,255,.9); }
+
+/* Status */
+.status-bar { margin-top:12px; text-align:center; color:white; }
+.speed-label {
+    font-size:15px; font-weight:bold;
+    text-shadow:1px 1px 3px rgba(0,0,0,.5); margin-bottom:6px;
+}
+.battery-bar {
+    width:110px; height:10px; border:2px solid rgba(255,255,255,.7);
+    border-radius:5px; overflow:hidden; margin:0 auto;
+}
+.battery-level {
+    height:100%; width:80%; background:linear-gradient(90deg,#4CAF50,#66BB6A);
+    transition:width .5s,background .5s;
+}
+
+/* Happy */
+.pet-wrapper.happy .mouth { height:14px; border-bottom-width:4px; }
+.pet-wrapper.happy .cheek { opacity:.8; }
+
+/* Wind particles */
+.wind-particles { position:absolute; top:50%; left:100%; transform:translateY(-50%); pointer-events:none; }
+.particle {
+    position:absolute; width:40px; height:2px; background:rgba(255,255,255,.5); border-radius:1px;
+    opacity:0;
+}
+.particle.active { animation:blow .8s ease-out infinite; }
+.particle:nth-child(2) { animation-delay:.15s; }
+.particle:nth-child(3) { animation-delay:.3s; }
+@keyframes blow {
+    0% { opacity:1; transform:translateX(0); }
+    100% { opacity:0; transform:translateX(80px); }
+}
+</style>
+</head>
+<body>
+<div class="pet-wrapper" id="wrapper">
+    <div class="pet-body">
+        <div class="pet-head" id="petHead">
+            <div class="eye left"></div>
+            <div class="eye right"></div>
+            <div class="mouth" id="mouth"></div>
+            <div class="cheek left"></div>
+            <div class="cheek right"></div>
+        </div>
+        <div class="pet-torso"></div>
+        <div class="fan-container">
+            <div class="fan-guard"></div>
+            <div class="fan-blades" id="fanBlades">
+                <div class="blade blade-1"></div>
+                <div class="blade blade-2"></div>
+                <div class="blade blade-3"></div>
+                <div class="center-dot"></div>
+            </div>
+        </div>
+    </div>
+    <div class="controls">
+        <button class="btn" id="powerBtn">⏻</button>
+        <button class="btn" id="speedBtn">💨</button>
+        <button class="btn" id="petBtn">❤️</button>
+    </div>
+    <div class="status-bar">
+        <div class="speed-label" id="speedLabel">停止</div>
+        <div class="battery-bar"><div class="battery-level" id="batteryLevel"></div></div>
+    </div>
+    <div class="wind-particles" id="windParticles">
+        <div class="particle" id="p1"></div>
+        <div class="particle" id="p2"></div>
+        <div class="particle" id="p3"></div>
+    </div>
+</div>
+
+<script>
+//<![CDATA[
+const fanBlades = document.getElementById('fanBlades');
+const powerBtn = document.getElementById('powerBtn');
+const speedBtn = document.getElementById('speedBtn');
+const petBtn = document.getElementById('petBtn');
+const speedLabel = document.getElementById('speedLabel');
+const batteryLevel = document.getElementById('batteryLevel');
+const wrapper = document.getElementById('wrapper');
+const windParticles = document.getElementById('windParticles');
+const mouth = document.getElementById('mouth');
+
+let running = false, speed = 0, mood = 50, battery = 80;
+const speeds = [
+    {name:'停止', cls:''},
+    {name:'低速', cls:'speed-low'},
+    {name:'中速', cls:'spinning'},
+    {name:'高速', cls:'speed-high'}
+];
+
+function updateFan() {
+    fanBlades.className = 'fan-blades';
+    if (running && speed > 0) fanBlades.classList.add(speeds[speed].cls);
+}
+
+function updateMood() {
+    if (mood > 70) {
+        mouth.style.height = '14px';
+        mouth.style.borderBottomWidth = '4px';
+        wrapper.classList.add('happy');
+    } else if (mood > 40) {
+        mouth.style.height = '9px';
+        mouth.style.borderBottomWidth = '3px';
+        wrapper.classList.remove('happy');
+    } else {
+        mouth.style.height = '5px';
+        mouth.style.borderBottomWidth = '2px';
+        wrapper.classList.remove('happy');
+    }
+}
+
+function updateBattery() {
+    batteryLevel.style.width = battery + '%';
+    if (battery < 20) batteryLevel.style.background = 'linear-gradient(90deg,#f44336,#ef5350)';
+    else if (battery < 50) batteryLevel.style.background = 'linear-gradient(90deg,#ff9800,#ffb74d)';
+    else batteryLevel.style.background = 'linear-gradient(90deg,#4CAF50,#66BB6A)';
+    if (battery <= 0) {
+        running = false; speed = 0;
+        powerBtn.classList.remove('active');
+        speedLabel.textContent = '电量耗尽';
+        updateFan();
+        windParticles.innerHTML = '';
+    }
+}
+
+function showWind(show) {
+    if (show) {
+        windParticles.innerHTML = '<div class="particle active"></div><div class="particle active"></div><div class="particle active"></div>';
+    } else {
+        windParticles.innerHTML = '';
+    }
+}
+
+powerBtn.onclick = function() {
+    running = !running;
+    if (running && speed === 0) speed = 1;
+    if (!running) speed = 0;
+    powerBtn.classList.toggle('active', running);
+    speedLabel.textContent = running ? speeds[speed].name : '停止';
+    updateFan();
+    showWind(running && speed > 0);
+};
+
+speedBtn.onclick = function() {
+    if (!running) {
+        running = true; speed = 1;
+        powerBtn.classList.add('active');
+    } else {
+        speed = (speed + 1) % speeds.length;
+    }
+    speedLabel.textContent = speeds[speed].name;
+    updateFan();
+    showWind(running && speed > 0);
+};
+
+petBtn.onclick = function() {
+    mood = Math.min(100, mood + 15);
+    updateMood();
+    petBtn.style.transform = 'scale(1.3)';
+    setTimeout(function(){ petBtn.style.transform = ''; }, 200);
+};
+
+setInterval(function() {
+    if (running && battery > 0) {
+        battery = Math.max(0, battery - 1);
+        updateBattery();
+    }
+}, 3000);
+
+updateMood();
+updateBattery();
+
+// Make window draggable
+document.onmousedown = function(e) {
+    if (e.target.tagName === 'BUTTON') return;
+    var x = screenX + event.clientX;
+    var y = screenY + event.clientY;
+    document.onmousemove = function(ev) {
+        window.moveTo(ev.clientX - (x - screenX), ev.clientY - (y - screenY));
+    };
+    document.onmouseup = function() {
+        document.onmousemove = null;
+        document.onmouseup = null;
+    };
+};
+//]]>
+</script>
+</body>
+</html>
