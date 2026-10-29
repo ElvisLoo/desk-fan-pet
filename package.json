@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node tools/start.js",
     "test": "node --test \"test/*.test.js\"",
-    "dist": "node tools/dist.js"
+    "dist": "node tools/dist.js",
+    "icons": "node tools/icon-run.js"
   },
   "keywords": [
     "desktop-pet",
@@ -27,12 +28,14 @@
     },
     "files": [
       "src/**/*",
+      "assets/icon-256.png",
       "package.json"
     ],
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "icon": "assets/icon-256.png"
     },
     "nsis": {
       "oneClick": false,
