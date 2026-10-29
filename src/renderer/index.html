@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:" />
+<title>风扇宠物</title>
+<link rel="stylesheet" href="pet.css" />
+</head>
+<body>
+  <div class="pet" id="pet" data-state="idle">
+    <!-- 情绪气泡 -->
+    <div class="bubble" id="bubble" hidden></div>
+
+    <div class="body">
+      <!-- 风扇外壳 -->
+      <div class="cage">
+        <div class="blades" id="blades">
+          <i></i><i></i><i></i><i></i>
+        </div>
+        <div class="hub">
+          <span class="eye left"></span>
+          <span class="eye right"></span>
+          <span class="mouth"></span>
+        </div>
+      </div>
+      <div class="stand"></div>
+      <div class="base"></div>
+    </div>
+
+    <!-- 睡觉时飘出的 Z -->
+    <div class="zzz" id="zzz" hidden><span>z</span><span>z</span><span>z</span></div>
+  </div>
+  <script src="pet.js"></script>
+</body>
+</html>

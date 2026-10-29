@@ -1,0 +1,187 @@
+/* ============================================================
+   风扇宠物 · 外观
+   原则：
+   1. 待机时只用 transform/opacity 做动画（不触发布局，空闲 CPU 接近 0）；
+   2. 扇叶转动的 animation-play-state 随状态启停，睡觉时完全停下；
+   3. 所有动画都能被 prefers-reduced-motion 关掉。
+   ============================================================ */
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0; width: 100%; height: 100%;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  cursor: grab;
+  -webkit-app-region: no-drag;
+}
+body.dragging { cursor: grabbing; }
+
+.pet {
+  width: 100%; height: 100%;
+  display: flex; align-items: flex-end; justify-content: center;
+  position: relative;
+  padding-bottom: 6px;
+}
+
+/* ---------- 身体 ---------- */
+.body {
+  position: relative;
+  width: 108px; height: 122px;
+  transform-origin: 50% 92%;
+  animation: breathe 3.4s ease-in-out infinite;
+}
+@keyframes breathe {
+  0%, 100% { transform: scaleY(1) translateY(0); }
+  50%      { transform: scaleY(0.975) translateY(1px); }
+}
+
+/* 外壳 */
+.cage {
+  position: absolute; top: 0; left: 50%;
+  width: 104px; height: 104px;
+  margin-left: -52px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 30%, #fff3c4 0%, #fcd34d 38%, #f59e0b 100%);
+  box-shadow: inset 0 -6px 12px rgba(180, 83, 9, .35),
+              0 6px 14px rgba(120, 53, 15, .28);
+  overflow: hidden;
+}
+
+/* 扇叶 */
+.blades {
+  position: absolute; inset: 9px;
+  animation: spin 1.1s linear infinite;
+  animation-play-state: paused;
+}
+.blades i {
+  position: absolute; left: 50%; top: 50%;
+  width: 40px; height: 16px;
+  margin: -8px 0 0 -2px;
+  border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+  background: linear-gradient(90deg, #ffffff 0%, #e7e5e4 100%);
+  opacity: .92;
+  transform-origin: 2px 8px;
+}
+.blades i:nth-child(1) { transform: rotate(0deg); }
+.blades i:nth-child(2) { transform: rotate(90deg); }
+.blades i:nth-child(3) { transform: rotate(180deg); }
+.blades i:nth-child(4) { transform: rotate(270deg); }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* 转得越快 = 越有精神；睡觉时停 */
+.pet[data-state="walk"] .blades,
+.pet[data-state="idle"] .blades { animation-duration: 1.6s; animation-play-state: running; }
+.pet[data-state="excited"] .blades { animation-duration: .28s; animation-play-state: running; }
+.pet[data-state="drag"] .blades { animation-duration: .8s; animation-play-state: running; }
+.pet[data-state="sleep"] .blades { animation-play-state: paused; }
+
+/* 中心轴 + 脸 */
+.hub {
+  position: absolute; left: 50%; top: 50%;
+  width: 30px; height: 30px; margin: -15px 0 0 -15px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #a8a29e, #57534e);
+  box-shadow: inset 0 -2px 4px rgba(0,0,0,.3);
+  display: flex; align-items: center; justify-content: center;
+  gap: 5px;
+}
+.eye {
+  width: 4.5px; height: 5.5px; border-radius: 50%;
+  background: #1c1917;
+  animation: blink 5.2s infinite;
+}
+@keyframes blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  95% { transform: scaleY(.1); }
+}
+.mouth {
+  position: absolute; bottom: 5px; left: 50%;
+  width: 7px; height: 3px; margin-left: -3.5px;
+  border-bottom: 1.5px solid #1c1917;
+  border-radius: 0 0 6px 6px;
+}
+
+/* 支架 */
+.stand {
+  position: absolute; bottom: 22px; left: 50%;
+  width: 12px; height: 22px; margin-left: -6px;
+  background: linear-gradient(180deg, #78716c, #57534e);
+  border-radius: 3px;
+}
+.base {
+  position: absolute; bottom: 4px; left: 50%;
+  width: 58px; height: 20px; margin-left: -29px;
+  border-radius: 50% / 40%;
+  background: linear-gradient(180deg, #78716c, #44403c);
+  box-shadow: 0 3px 6px rgba(0,0,0,.25);
+}
+
+/* ---------- 状态 ---------- */
+/* 睡觉：耷拉 + 眯眼 + 冒 Z */
+.pet[data-state="sleep"] .body { animation: sleepBob 4.8s ease-in-out infinite; }
+@keyframes sleepBob {
+  0%, 100% { transform: translateY(2px) scaleY(.97); }
+  50%      { transform: translateY(0) scaleY(1); }
+}
+.pet[data-state="sleep"] .eye { animation: none; height: 1.5px; border-radius: 1px; }
+.pet[data-state="sleep"] .mouth { width: 5px; border-bottom-width: 1px; opacity: .65; }
+
+/* 兴奋：跳动 */
+.pet[data-state="excited"] .body { animation: jump .42s ease-in-out infinite; }
+@keyframes jump {
+  0%, 100% { transform: translateY(0) scale(1); }
+  40%      { transform: translateY(-10px) scale(1.03, .97); }
+  70%      { transform: translateY(0) scale(.98, 1.02); }
+}
+
+/* 被拖：倾斜 */
+.pet[data-state="drag"] .body { animation: none; transform: rotate(-8deg) scale(1.03); }
+.pet[data-state="drag"] .eye { animation: none; height: 7px; width: 5.5px; }
+
+/* 隐藏时不渲染 */
+.pet[data-state="hidden"] { display: none; }
+
+/* ---------- Z Z Z ---------- */
+.zzz {
+  position: absolute; right: 8px; top: 6px;
+  font: 700 13px/1 "Segoe UI", sans-serif;
+  color: rgba(68, 64, 60, .75);
+}
+.zzz span { position: absolute; animation: float 3s ease-in-out infinite; }
+.zzz span:nth-child(1) { animation-delay: 0s;   left: 0; }
+.zzz span:nth-child(2) { animation-delay: .9s;  left: 8px; font-size: 11px; }
+.zzz span:nth-child(3) { animation-delay: 1.8s; left: 16px; font-size: 9px; }
+@keyframes float {
+  0%   { opacity: 0; transform: translateY(4px); }
+  30%  { opacity: .9; }
+  100% { opacity: 0; transform: translateY(-14px); }
+}
+
+/* ---------- 气泡 ---------- */
+.bubble {
+  position: absolute; top: -4px; left: 50%;
+  transform: translateX(-50%);
+  max-width: 132px;
+  padding: 5px 9px;
+  border-radius: 10px;
+  background: #fff;
+  color: #292524;
+  font: 12px/1.35 "Microsoft YaHei UI", system-ui, sans-serif;
+  box-shadow: 0 3px 10px rgba(0,0,0,.18);
+  white-space: nowrap;
+  animation: pop .18s ease-out;
+  z-index: 2;
+}
+.bubble::after {
+  content: ""; position: absolute; bottom: -4px; left: 50%;
+  width: 8px; height: 8px; margin-left: -4px;
+  background: #fff; transform: rotate(45deg);
+}
+@keyframes pop { from { opacity: 0; transform: translateX(-50%) scale(.86); } }
+
+/* 无障碍：减少动效 */
+@media (prefers-reduced-motion: reduce) {
+  .body, .blades, .eye, .zzz span { animation: none !important; }
+}

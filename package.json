@@ -1,0 +1,43 @@
+{
+  "name": "desk-fan-pet",
+  "version": "0.1.0",
+  "private": true,
+  "description": "桌面风扇宠物 —— 一只住在屏幕上、会跟着你喘气的小风扇",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node tools/start.js",
+    "test": "node --test \"test/*.test.js\"",
+    "dist": "node tools/dist.js"
+  },
+  "keywords": [
+    "desktop-pet",
+    "electron",
+    "fan"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "com.jikegang.deskfanpet",
+    "productName": "风扇宠物",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    }
+  }
+}
