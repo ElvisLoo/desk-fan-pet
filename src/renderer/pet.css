@@ -185,3 +185,19 @@ body.dragging { cursor: grabbing; }
 @media (prefers-reduced-motion: reduce) {
   .body, .blades, .eye, .zzz span { animation: none !important; }
 }
+
+/* ---------- 专注 / 休息徽标 ---------- */
+.mode-badge {
+  position: absolute;
+  right: 4px;
+  bottom: 2px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font: 600 11px/1.4 "Microsoft YaHei UI", system-ui, sans-serif;
+  color: #fff;
+  background: rgba(37, 99, 235, .92);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .22);
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+.mode-badge[data-mode="break"] { background: rgba(16, 185, 129, .92); }

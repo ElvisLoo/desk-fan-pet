@@ -17,6 +17,13 @@ const STATE = {
   HIDDEN: 'hidden',   // 全屏应用时不打扰
 };
 
+/** 工作模式：决定它在提醒你什么 */
+const MODE = {
+  FREE: 'free',       // 普通陪玩
+  FOCUS: 'focus',     // 番茄钟进行中
+  BREAK: 'break',     // 休息时间
+};
+
 /** 可调参数（面试/办公场景默认偏安静） */
 const DEFAULT_OPTS = {
   walkIntervalMs: 12000,   // 多久自己走一次
@@ -24,6 +31,11 @@ const DEFAULT_OPTS = {
   excitedMs: 1600,         // 兴奋状态持续
   moveSpeedPxPerSec: 26,   // 走路速度
   edgeMarginPx: 8,         // 离屏幕边缘留白
+  // —— 以下是番茄钟 / 喝水提醒 ——
+  focusMs: 25 * 60 * 1000, // 专注时长
+  breakMs: 5 * 60 * 1000,  // 休息时长
+  sipIntervalMs: 45 * 60 * 1000, // 多久提醒喝一次水
+  sipRemindMs: 20000,      // 提醒持续多久后自动收起
 };
 
 /**
@@ -51,7 +63,17 @@ class PetBrain {
     this.stateSince = t0;
     this.targetX = null;       // 走路目标
     this.mood = 70;            // 0..100，影响表情
-    this.stats = { clicks: 0, walks: 0, slept: 0 };
+    this.stats = { clicks: 0, walks: 0, slept: 0, focusDone: 0, sips: 0 };
+
+    // —— 工作模式 ——
+    this.mode = MODE.FREE;
+    this.modeSince = t0;
+    this.nextSipAt = t0 + this.opts.sipIntervalMs;
+    this.reminder = null;      // { kind: 'sip'|'focus-done'|'break-done', until }
+
+    // —— 转速随负载 ——
+    this.load = 0;             // 0..1，来自系统 CPU
+    this.spin = 0.5;           // 0..1，实际显示转速（平滑过）
   }
 
   /** 切状态，并记录进入时间 */
@@ -73,6 +95,8 @@ class PetBrain {
     this.stats.clicks++;
     this.mood = Math.min(100, this.mood + 4);
     this.setState(STATE.EXCITED, now);
+    // 点一下顺手收掉当前提醒，避免一直挂着
+    this.reminder = null;
   }
 
   /** 拖拽开始 / 结束 */
@@ -93,17 +117,82 @@ class PetBrain {
     else this.setState(STATE.IDLE, now);
   }
 
+  /** 外部喂进来的系统负载（0..1），用于让扇叶转快转慢 */
+  setLoad(load, dtMs = 0) {
+    const l = clamp(Number(load), 0, 1);
+    if (!Number.isFinite(l)) return;
+    this.load = l;
+    // 目标转速：低负载 0.25（看得见在转但不烦），满载 1.0
+    const target = 0.25 + l * 0.75;
+    // 平滑，避免 CPU 抖动时扇叶忽快忽慢
+    const k = clamp(dtMs / 600, 0, 1);
+    this.spin = this.spin + (target - this.spin) * Math.max(0.08, k);
+  }
+
+  /** 开始番茄钟 */
+  startFocus(now = Date.now()) {
+    this.mode = MODE.FOCUS;
+    this.modeSince = now;
+    this.reminder = null;
+    this.mood = Math.min(100, this.mood + 2);
+  }
+
+  /** 结束番茄钟（提前放弃也算） */
+  stopFocus(now = Date.now()) {
+    this.mode = MODE.FREE;
+    this.modeSince = now;
+    this.reminder = null;
+  }
+
+  /** 距离本轮结束还有多少毫秒 */
+  modeRemaining(now = Date.now()) {
+    if (this.mode === MODE.FOCUS) {
+      return Math.max(0, this.opts.focusMs - (now - this.modeSince));
+    }
+    if (this.mode === MODE.BREAK) {
+      return Math.max(0, this.opts.breakMs - (now - this.modeSince));
+    }
+    return 0;
+  }
+
   /**
    * 推进一帧。返回本帧需要做的动作，调用方据此移动窗口 / 重绘。
    * @param {number} dtMs 距上一帧的毫秒数
    * @param {object} env 环境：{screenW, screenH, petW, petH}
    */
   tick(dtMs, env = {}, now = Date.now()) {
-    const act = { moveTo: null, state: this.state };
+    const act = { moveTo: null, state: this.state, reminder: null };
     if (this.state === STATE.HIDDEN) return act;
 
-    // 长时间无交互 → 睡
-    if (this.state !== STATE.SLEEP && this.state !== STATE.DRAG
+    // 转速始终平滑更新（隐藏时不转，省电）
+    this.setLoad(this.load, dtMs);
+
+    // —— 番茄钟流转 ——
+    if (this.mode === MODE.FOCUS && now - this.modeSince >= this.opts.focusMs) {
+      this.mode = MODE.BREAK;
+      this.modeSince = now;
+      this.stats.focusDone++;
+      this.mood = Math.min(100, this.mood + 8);
+      this.reminder = { kind: 'focus-done', until: now + 15000 };
+      this.setState(STATE.EXCITED, now);
+    } else if (this.mode === MODE.BREAK && now - this.modeSince >= this.opts.breakMs) {
+      this.mode = MODE.FREE;
+      this.modeSince = now;
+      this.reminder = { kind: 'break-done', until: now + 12000 };
+    }
+
+    // —— 喝水提醒（专注时也提醒，但休息中不叠加）——
+    if (this.mode !== MODE.BREAK && now >= this.nextSipAt) {
+      this.nextSipAt = now + this.opts.sipIntervalMs;
+      this.stats.sips++;
+      this.reminder = { kind: 'sip', until: now + this.opts.sipRemindMs };
+    }
+    // 提醒过期自动收起
+    if (this.reminder && now > this.reminder.until) this.reminder = null;
+    act.reminder = this.reminder;
+
+    // 长时间无交互 → 睡（专注时不睡，它得陪着）
+    if (this.state !== STATE.SLEEP && this.state !== STATE.DRAG && this.mode === MODE.FREE
         && now - this.lastInteractAt > this.opts.sleepAfterMs) {
       this.setState(STATE.SLEEP, now);
       act.state = this.state;
@@ -118,6 +207,13 @@ class PetBrain {
     }
 
     if (this.state === STATE.DRAG || this.state === STATE.SLEEP) return act;
+
+    // 专注时不乱跑，免得打断注意力
+    if (this.mode === MODE.FOCUS) {
+      if (this.state === STATE.WALK) this.setState(STATE.IDLE, now);
+      act.state = this.state;
+      return act;
+    }
 
     // 待机久了 → 挑个目标走一走
     if (this.state === STATE.IDLE && now - this.stateSince > this.opts.walkIntervalMs) {
@@ -151,8 +247,8 @@ class PetBrain {
   toPixels(env = {}) {
     const sw = env.screenW || 1920;
     const sh = env.screenH || 1080;
-    const pw = env.petW || 140;
-    const ph = env.petH || 140;
+    const pw = env.petW || 150;
+    const ph = env.petH || 150;
     const m = this.opts.edgeMarginPx;
     const x = Math.round(this.x * (sw - pw - m * 2)) + m;
     const y = Math.round(this.y * (sh - ph - m * 2)) + m;
@@ -167,4 +263,4 @@ function clamp(v, lo, hi) {
   return Math.min(hi, Math.max(lo, n));
 }
 
-module.exports = { PetBrain, STATE, DEFAULT_OPTS, clamp, clamp01 };
+module.exports = { PetBrain, STATE, MODE, DEFAULT_OPTS, clamp, clamp01 };

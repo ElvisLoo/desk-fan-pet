@@ -9,7 +9,8 @@
  */
 const path = require('path');
 const { app, BrowserWindow, ipcMain, Tray, Menu, screen, nativeImage, globalShortcut } = require('electron');
-const { PetBrain, STATE } = require('./pet-brain');
+const os = require('os');
+const { PetBrain, STATE, MODE } = require('./pet-brain');
 const { createPetIcon } = require('./pet-icon');
 
 const PET_W = 150;
@@ -65,13 +66,47 @@ function setThrough(through) {
   win.setIgnoreMouseEvents(through, { forward: true });
 }
 
+/**
+ * 用 os.cpus() 的累计时间差估算 CPU 负载（0..1）。
+ * 不引第三方依赖；采样间隔 2 秒，够平滑也不会自己变成负载。
+ */
+function createCpuSampler() {
+  let prev = snapshot();
+  function snapshot() {
+    const cpus = os.cpus() || [];
+    let idle = 0, total = 0;
+    for (const c of cpus) {
+      const t = c.times;
+      idle += t.idle;
+      total += t.user + t.nice + t.sys + t.idle + t.irq;
+    }
+    return { idle, total };
+  }
+  return () => {
+    const cur = snapshot();
+    const dIdle = cur.idle - prev.idle;
+    const dTotal = cur.total - prev.total;
+    prev = cur;
+    if (dTotal <= 0) return 0;
+    return Math.min(1, Math.max(0, 1 - dIdle / dTotal));
+  };
+}
+
 function startLoop() {
   lastTickAt = Date.now();
+  const sampleCpu = createCpuSampler();
+  let lastCpuAt = 0;
   timer = setInterval(() => {
     if (!win || win.isDestroyed()) return;
     const now = Date.now();
     const dt = Math.min(500, now - lastTickAt); // 系统睡眠唤醒后 dt 会很大，夹紧
     lastTickAt = now;
+
+    // 每 2 秒采一次 CPU，避免采样本身占资源
+    if (now - lastCpuAt > 2000) {
+      lastCpuAt = now;
+      brain.setLoad(sampleCpu(), 2000);
+    }
 
     const d = screen.getPrimaryDisplay();
     const area = d.workAreaSize;
@@ -83,9 +118,31 @@ function startLoop() {
       mood: brain.mood,
       facing: brain.facing,
       since: now - brain.stateSince,
+      mode: brain.mode,
+      remainingMs: brain.modeRemaining(now),
+      reminder: act.reminder,
+      spin: brain.spin,
     });
   }, 50);
   timer.unref?.();
+}
+
+let focusItem = null;
+
+function refreshTrayMenu() {
+  if (!tray) return;
+  const mins = Math.ceil(brain.modeRemaining() / 60000);
+  if (focusItem) {
+    if (brain.mode === MODE.FOCUS) {
+      focusItem.label = `专注中：还剩 ${mins} 分钟`;
+      focusItem.visible = true;
+    } else if (brain.mode === MODE.BREAK) {
+      focusItem.label = `休息中：还剩 ${mins} 分钟`;
+      focusItem.visible = true;
+    } else {
+      focusItem.visible = false;
+    }
+  }
 }
 
 function createTray() {
@@ -95,10 +152,27 @@ function createTray() {
     { label: '摸摸它', click: () => { brain.click(); win?.webContents.send('pet:pat'); } },
     { label: '叫它过来', click: bringToCenter },
     { type: 'separator' },
+    { label: '开始专注（25 分钟）', click: () => { brain.startFocus(); refreshTrayMenu(); } },
+    { label: '结束专注', click: () => { brain.stopFocus(); refreshTrayMenu(); } },
+    { label: `专注中：${0} 分钟`, enabled: false, id: 'focusLeft', visible: false },
+    { type: 'separator' },
     { label: '暂时隐藏（Ctrl+Alt+P 切换）', click: toggleVisible },
     { type: 'separator' },
     { label: '退出', click: () => app.quit() },
   ]));
+  // 保存“专注中”那一项的引用，每分钟更新文字
+  const menu = tray.contextMenu || null;
+  const findItem = (items) => {
+    for (const it of items || []) {
+      if (it && typeof it.label === 'string' && it.label.includes('专注中：')) return it;
+      const sub = it && it.submenu && it.submenu.items;
+      const hit = sub ? findItem(sub) : null;
+      if (hit) return hit;
+    }
+    return null;
+  };
+  focusItem = menu ? findItem(menu.items) : null;
+  refreshTrayMenu();
   tray.on('click', () => { brain.click(); win?.webContents.send('pet:pat'); });
 }
 
@@ -163,6 +237,7 @@ function watchFullscreen() {
     const full = d.size;
     // 任务栏被占满 ⇒ 大概率有全屏应用
     const isFullscreen = cur.height >= full.height - 2;
+    if (brain.mode !== MODE.FREE) refreshTrayMenu();
     if (isFullscreen && brain.state !== STATE.HIDDEN) { win.hide(); brain.setHidden(true); }
     else if (!isFullscreen && brain.state === STATE.HIDDEN && visible) { win.showInactive(); brain.setHidden(false); }
   }, 3000).unref?.();
