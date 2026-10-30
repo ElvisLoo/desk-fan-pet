@@ -11,6 +11,7 @@ const path = require('path');
 const { app, BrowserWindow, ipcMain, Tray, Menu, screen, nativeImage, globalShortcut } = require('electron');
 const os = require('os');
 const { PetBrain, STATE, MODE } = require('./pet-brain');
+const { Config } = require('./config');
 const { createPetIcon } = require('./pet-icon');
 
 const PET_W = 150;
@@ -66,16 +67,69 @@ function setAutostart(on) {
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.quit();
 
+/** 窗口当前位置是否还落在某块屏幕的可见区域内（拔掉副屏后要判断） */
+function isOnAnyScreen(x, y) {
+  try {
+    const displays = screen.getAllDisplays();
+    for (const d of displays) {
+      const b = d.bounds;
+      // 只要求有一部分可见：窗口左上角落在屏内，或与屏有交集
+      if (x + PET_W > b.x && x < b.x + b.width && y + PET_H > b.y && y < b.y + b.height) {
+        return true;
+      }
+    }
+  } catch (_) {}
+  return false;
+}
+
+/** 记住当前位置；失败只记日志，不打断使用 */
+function savePosition() {
+  if (!cfg || !win || win.isDestroyed()) return { ok: false };
+  try {
+    const [x, y] = win.getPosition();
+    return cfg.set({ x, y, placed: true });
+  } catch (e) {
+    console.warn('[pet] 保存位置失败:', e && e.message);
+    return { ok: false };
+  }
+}
+
+// 配置只在 ready 之后创建（此时 userData 路径才确定）
+let cfg = null;
+function initConfig() {
+  cfg = new Config(path.join(app.getPath('userData'), 'pet-config.json'));
+  cfg.load();
+  return cfg;
+}
+
 function createWindow() {
   const area = screen.getPrimaryDisplay().workAreaSize;
   brain = new PetBrain({ now: Date.now() });
   const pos = brain.toPixels({ ...area, screenW: area.width, screenH: area.height, petW: PET_W, petH: PET_H });
 
+  // 用户拖过就用上次的位置，没拖过才落到默认角落。
+  // 但必须先确认那块屏还在：拔掉副屏后旧坐标可能落到屏幕外，
+  // 宠物会"启动成功但看不见"，这比不记住位置糟糕得多。
+  let startX = pos.x;
+  let startY = pos.y;
+  if (cfg && cfg.get('placed')) {
+    const sx = cfg.get('x');
+    const sy = cfg.get('y');
+    if (Number.isFinite(sx) && Number.isFinite(sy) && isOnAnyScreen(sx, sy)) {
+      startX = sx;
+      startY = sy;
+      brain.setPosition?.(startX, startY);
+    } else if (Number.isFinite(sx)) {
+      console.warn('[pet] 记住的位置已不在任何屏幕上，回退默认位置');
+      cfg.set({ placed: false, x: null, y: null });
+    }
+  }
+
   win = new BrowserWindow({
     width: PET_W,
     height: PET_H,
-    x: pos.x,
-    y: pos.y,
+    x: startX,
+    y: startY,
     frame: false,
     transparent: true,
     resizable: false,
@@ -285,6 +339,9 @@ ipcMain.handle('pet:dragEnd', (_e, p) => {
   brain.dragEnd(rx, ry, Date.now(), {
     screenW: a.width, screenH: a.height, petW: PET_W, petH: PET_H,
   });
+  // 松手即记：这是唯一"用户明确表达了意图"的时刻。
+  // 边爬边动的不记，否则会被攀爬动画写进一堆中间坐标。
+  savePosition();
   return { ok: true, edge: brain.edge, state: brain.state };
 });
 // 拖拽过程中实时移动窗口。用 send（不等待回执）而不是 invoke，
@@ -333,6 +390,7 @@ process.on('unhandledRejection', (reason) => {
 
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
+  initConfig();
   createWindow();
   createTray();
   startLoop();
@@ -358,5 +416,7 @@ app.on('window-all-closed', () => { /* 托盘常驻 */ });
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   if (timer) clearInterval(timer);
+  // 退出前再存一次：用户可能拖完立刻关电脑，晚于拖动的那次保存
+  savePosition();
 });
 app.on('second-instance', () => { if (win) { win.showInactive(); bringToCenter(); } });
