@@ -15,7 +15,11 @@ const STATE = {
   SLEEP: 'sleep',     // 长时间没人理
   EXCITED: 'excited', // 被点击/喂食
   HIDDEN: 'hidden',   // 全屏应用时不打扰
+  CLIMB: 'climb',     // 贴在屏幕边缘往上爬
 };
+
+/** 屏幕边缘 */
+const EDGE = { NONE: 'none', LEFT: 'left', RIGHT: 'right' };
 
 /** 工作模式：决定它在提醒你什么 */
 const MODE = {
@@ -36,6 +40,10 @@ const DEFAULT_OPTS = {
   breakMs: 5 * 60 * 1000,  // 休息时长
   sipIntervalMs: 45 * 60 * 1000, // 多久提醒喝一次水
   sipRemindMs: 20000,      // 提醒持续多久后自动收起
+  // —— 边缘攀爬 ——
+  edgeSnapPx: 28,          // 拖到离边缘多近算「贴上」
+  climbSpeedPxPerSec: 40,  // 爬行速度
+  climbIdleMs: 6000,       // 爬多久自己下来
 };
 
 /**
@@ -74,6 +82,11 @@ class PetBrain {
     // —— 转速随负载 ——
     this.load = 0;             // 0..1，来自系统 CPU
     this.spin = 0.5;           // 0..1，实际显示转速（平滑过）
+
+    // —— 边缘攀爬 ——
+    this.edge = EDGE.NONE;     // 当前贴在哪条边
+    this.climbDir = -1;        // -1 向上，1 向下
+    this.climbedAt = 0;
   }
 
   /** 切状态，并记录进入时间 */
@@ -92,6 +105,8 @@ class PetBrain {
 
   click(now = Date.now()) {
     this.touch(now);
+    // 贴在边上时点一下 = 让它下来
+    if (this.edge !== EDGE.NONE) this.detachFromEdge(now);
     this.stats.clicks++;
     this.mood = Math.min(100, this.mood + 4);
     this.setState(STATE.EXCITED, now);
@@ -105,9 +120,44 @@ class PetBrain {
     this.setState(STATE.DRAG, now);
   }
 
-  dragEnd(x, y, now = Date.now()) {
+  dragEnd(x, y, now = Date.now(), env = {}) {
     this.x = clamp01(x);
     this.y = clamp01(y);
+    this.attachToEdge(env, now);
+    if (this.edge !== EDGE.NONE) this.setState(STATE.CLIMB, now);
+    else this.setState(STATE.IDLE, now);
+  }
+
+  /**
+   * 判断拖放位置是否贴到左右边缘，贴上了就转为攀爬。
+   *
+   * 为什么要限制在左右：上下边缘贴上去会盖住任务栏或标题栏，
+   * 而左右两侧通常是空的，宠物挂在那里最不碍事。
+   */
+  attachToEdge(env = {}, now = Date.now()) {
+    const sw = env.screenW || 1920;
+    const pw = env.petW || 150;
+    const m = this.opts.edgeMarginPx;
+    const snap = this.opts.edgeSnapPx;
+    // 把 0..1 的相对位置换算回像素距离
+    const px = this.x * Math.max(1, sw - pw - m * 2);
+    const leftGap = px;
+    const rightGap = Math.max(0, sw - pw - m * 2 - px);
+
+    if (leftGap <= snap) { this.edge = EDGE.LEFT; this.x = 0; }
+    else if (rightGap <= snap) { this.edge = EDGE.RIGHT; this.x = 1; }
+    else { this.edge = EDGE.NONE; return false; }
+    this.climbDir = -1;
+    this.climbedAt = now;
+    return true;
+  }
+
+  /** 从边缘放下来 */
+  detachFromEdge(now = Date.now()) {
+    if (this.edge === EDGE.NONE) return;
+    this.edge = EDGE.NONE;
+    // 离开边缘一点点，避免下次 tick 又被判成贴上
+    this.x = clamp01(this.x + (this.x < 0.5 ? 0.06 : -0.06));
     this.setState(STATE.IDLE, now);
   }
 
@@ -208,6 +258,28 @@ class PetBrain {
 
     if (this.state === STATE.DRAG || this.state === STATE.SLEEP) return act;
 
+    // —— 贴边攀爬 ——
+    if (this.edge !== EDGE.NONE) {
+      // 爬一会儿自己下来，别一直挂在屏幕上
+      if (now - this.climbedAt > this.opts.climbIdleMs) {
+        this.detachFromEdge(now);
+        act.state = this.state;
+        act.moveTo = this.toPixels(env);
+        return act;
+      }
+      const sh = env.screenH || 1080;
+      const ph = env.petH || 150;
+      const step = (this.opts.climbSpeedPxPerSec * dtMs) / 1000 / Math.max(1, sh - ph - this.opts.edgeMarginPx * 2);
+      this.y += this.climbDir * step;
+      // 爬到顶/底就掉头
+      if (this.y <= 0.02) { this.y = 0.02; this.climbDir = 1; }
+      else if (this.y >= 0.9) { this.y = 0.9; this.climbDir = -1; }
+      act.state = STATE.CLIMB;
+      act.moveTo = this.toPixels(env);
+      this.setState(STATE.CLIMB, now);
+      return act;
+    }
+
     // 专注时不乱跑，免得打断注意力
     if (this.mode === MODE.FOCUS) {
       if (this.state === STATE.WALK) this.setState(STATE.IDLE, now);
@@ -263,4 +335,4 @@ function clamp(v, lo, hi) {
   return Math.min(hi, Math.max(lo, n));
 }
 
-module.exports = { PetBrain, STATE, MODE, DEFAULT_OPTS, clamp, clamp01 };
+module.exports = { PetBrain, STATE, MODE, EDGE, DEFAULT_OPTS, clamp, clamp01 };

@@ -41,8 +41,14 @@ window.pet.onFrame((s) => {
   } else {
     lastReminderKey = '';
   }
-  // 朝向：翻转整个身体
-  document.body.style.transform = s.facing < 0 ? 'scaleX(-1)' : '';
+  // 朝向：贴在边缘时朝向屏幕内侧，攀爬时轻微倾斜
+  if (s.edge && s.edge !== 'none') {
+    const flip = s.edge === 'right' ? 'scaleX(-1)' : '';
+    const tilt = s.climbDir > 0 ? ' rotate(6deg)' : ' rotate(-6deg)';
+    document.body.style.transform = flip + tilt;
+  } else {
+    document.body.style.transform = s.facing < 0 ? 'scaleX(-1)' : '';
+  }
   // 睡觉时显示 Z
   zzz.hidden = s.state !== 'sleep';
   // 心情影响嘴巴：开心时上扬更明显

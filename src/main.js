@@ -23,6 +23,42 @@ let timer = null;
 let lastTickAt = 0;
 let hovering = false;
 
+// ---------- 开机自启 ----------
+// 用注册表 Run 键而不是 Startup 文件夹：不需要额外权限，删除也干净。
+// HKCU 下写入，只影响当前用户，不需要管理员。
+const AUTOSTART_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
+const AUTOSTART_NAME = 'DeskFanPet';
+
+function autostartEnabled() {
+  if (process.platform !== 'win32') return false;
+  try {
+    const { execFileSync } = require('child_process');
+    const out = execFileSync('reg', ['query', AUTOSTART_KEY, '/v', AUTOSTART_NAME], { encoding: 'utf8', windowsHide: true });
+    return out.includes(AUTOSTART_NAME);
+  } catch (_) { return false; }
+}
+
+function setAutostart(on) {
+  if (process.platform !== 'win32') return { ok: false, reason: '仅支持 Windows' };
+  try {
+    const { execFileSync } = require('child_process');
+    if (on) {
+      // 打包后 process.execPath 就是 exe 本身；开发模式下指向 electron.exe，
+      // 用引号包住避免路径含空格时被拆开
+      const exe = process.execPath;
+      const args = app.isPackaged ? [exe] : [exe, path.resolve(__dirname, '..')];
+      execFileSync('reg', ['add', AUTOSTART_KEY, '/v', AUTOSTART_NAME, '/t', 'REG_SZ',
+        '/d', `"${args.join('" "')}"`, '/f'], { windowsHide: true });
+    } else {
+      execFileSync('reg', ['delete', AUTOSTART_KEY, '/v', AUTOSTART_NAME, '/f'], { windowsHide: true });
+    }
+    return { ok: true, enabled: on };
+  } catch (e) {
+    // 组策略禁用注册表时这里会失败，必须让调用方知道
+    return { ok: false, reason: String(e && e.message || e).slice(0, 120) };
+  }
+}
+
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.quit();
 
@@ -122,6 +158,8 @@ function startLoop() {
       remainingMs: brain.modeRemaining(now),
       reminder: act.reminder,
       spin: brain.spin,
+      edge: brain.edge,
+      climbDir: brain.climbDir,
     });
   }, 50);
   timer.unref?.();
@@ -157,6 +195,19 @@ function createTray() {
     { label: `专注中：${0} 分钟`, enabled: false, id: 'focusLeft', visible: false },
     { type: 'separator' },
     { label: '暂时隐藏（Ctrl+Alt+P 切换）', click: toggleVisible },
+    {
+      label: '开机自动启动',
+      type: 'checkbox',
+      checked: autostartEnabled(),
+      click: (item) => {
+        const r = setAutostart(item.checked);
+        if (!r.ok) {
+          // 写注册表失败时必须把勾去掉，否则用户以为设上了
+          item.checked = !item.checked;
+          win?.webContents.send('pet:notice', '开机自启设置失败：' + (r.reason || '未知原因'));
+        }
+      },
+    },
     { type: 'separator' },
     { label: '退出', click: () => app.quit() },
   ]));
@@ -205,8 +256,11 @@ ipcMain.handle('pet:dragEnd', (_e, p) => {
   // 像素 → 相对坐标
   const rx = (p.x - 8) / Math.max(1, a.width - PET_W - 16);
   const ry = (p.y - 8) / Math.max(1, a.height - PET_H - 16);
-  brain.dragEnd(rx, ry);
-  return { ok: true };
+  // 传入屏幕尺寸：吸附判定是按像素算的，缺了 env 就算不出距离
+  brain.dragEnd(rx, ry, Date.now(), {
+    screenW: a.width, screenH: a.height, petW: PET_W, petH: PET_H,
+  });
+  return { ok: true, edge: brain.edge, state: brain.state };
 });
 // 拖拽过程中实时移动窗口。用 send（不等待回执）而不是 invoke，
 // 否则鼠标每动 1px 都要走一次 IPC 往返，拖起来会顿。

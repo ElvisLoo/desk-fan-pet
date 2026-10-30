@@ -201,3 +201,8 @@ body.dragging { cursor: grabbing; }
   white-space: nowrap;
 }
 .mode-badge[data-mode="break"] { background: rgba(16, 185, 129, .92); }
+
+/* ---------- 贴边攀爬 ---------- */
+/* 攀爬时扇叶转慢一点，像在费力往上爬 */
+.pet[data-state="climb"] .blades { animation-duration: 2.6s; animation-play-state: running; }
+.pet[data-state="climb"] .body { animation: none; }
