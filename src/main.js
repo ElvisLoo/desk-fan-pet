@@ -16,6 +16,10 @@ const { createPetIcon } = require('./pet-icon');
 const PET_W = 150;
 const PET_H = 150;
 
+// 渲染进程崩溃的自动恢复上限：够覆盖偶发崩溃，又不至于无限重启
+const MAX_CRASH_RELOAD = 3;
+let crashCount = 0;
+
 let win = null;
 let tray = null;
 let brain = null;
@@ -93,6 +97,27 @@ function createWindow() {
   win.setIgnoreMouseEvents(true, { forward: true });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   win.on('closed', () => { win = null; });
+
+  // 渲染进程崩溃/被系统回收后，窗口还在但内容是空白透明的一块 ——
+  // 用户只会觉得「宠物凭空消失了」，而托盘图标还在，也不会自己恢复。
+  // 这里自动重建，并限制次数，避免某个必然崩溃的 bug 打成死循环。
+  win.webContents.on('render-process-gone', (_e, details) => {
+    console.error('[pet] 渲染进程退出:', details && details.reason);
+    if (!win || win.isDestroyed()) return;
+    if (crashCount >= MAX_CRASH_RELOAD) {
+      console.error('[pet] 连续崩溃次数过多，停止自动恢复');
+      return;
+    }
+    crashCount += 1;
+    setTimeout(() => {
+      if (win && !win.isDestroyed()) win.reload();
+    }, 600);
+  });
+
+  // 加载失败（文件缺失、路径被改）会留下一个全透明窗口，同样要换回可见状态
+  win.webContents.on('did-fail-load', (_e, code, desc) => {
+    console.error('[pet] 页面加载失败:', code, desc);
+  });
 }
 
 /** 宠物窗口的鼠标穿透开关：悬停时接管，离开后放开 */
@@ -297,14 +322,36 @@ function watchFullscreen() {
   }, 3000).unref?.();
 }
 
+// 进程级兜底：常驻托盘的小工具一旦抛异常就是静默退出，
+// 用户看到的是「图标还在但点了没反应」。这里至少留下可追溯的日志。
+process.on('uncaughtException', (err) => {
+  console.error('[pet] uncaughtException:', err && err.stack ? err.stack : err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[pet] unhandledRejection:', reason);
+});
+
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   createWindow();
   createTray();
   startLoop();
   watchFullscreen();
-  globalShortcut.register('Ctrl+Alt+P', toggleVisible);
+  // 返回值必须看：Ctrl+Alt+P 容易和输入法/截屏工具撞，撞了就没有任何提示。
+  const hotkeyOk = globalShortcut.register('Ctrl+Alt+P', toggleVisible);
+  if (!hotkeyOk) {
+    console.warn('[pet] Ctrl+Alt+P 被占用，显隐只能用托盘菜单');
+    if (tray) {
+      try {
+        tray.setToolTip('风扇宠物（Ctrl+Alt+P 被占用，请用右键菜单）');
+      } catch (_) {}
+    }
+  }
   console.log('[风扇宠物] 已启动');
+}).catch((err) => {
+  // 启动链失败时不能什么都不做，否则进程静默退出、双击毫无反应
+  console.error('[pet] 启动失败:', err && err.stack ? err.stack : err);
+  app.exit(1);
 });
 
 app.on('window-all-closed', () => { /* 托盘常驻 */ });
