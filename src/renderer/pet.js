@@ -30,6 +30,7 @@ window.pet.onFrame((s) => {
 
   // 番茄钟 / 休息：角落小徽标显示剩余分钟
   updateModeBadge(s);
+  updateSystemBadge(s.status);
 
   // 提醒：同一类只弹一次，避免每帧重刷
   if (s.reminder) {
@@ -94,6 +95,44 @@ function updateModeBadge(s) {
   modeBadge.dataset.mode = s.mode;
   modeBadge.hidden = false;
 }
+
+// ---- 系统状态徽标 ----
+// 只在"需要留意"时出现，正常时完全隐藏 ——
+// 一个常驻的百分比数字会变成视觉噪音，用户很快就当它不存在了。
+let sysBadge = null;
+let sysBadgeHideTimer = 0;
+
+const LEVEL_ICON = { battery: '🔋', memory: '🧠', cpu: '🔥' };
+
+function updateSystemBadge(status) {
+  if (!sysBadge) {
+    sysBadge = document.createElement('div');
+    sysBadge.className = 'sys-badge';
+    sysBadge.hidden = true;
+    document.querySelector('.pet').appendChild(sysBadge);
+  }
+  if (!status || !Array.isArray(status.alerts) || status.alerts.length === 0) {
+    // 没有警报就收起。但不要立刻收 —— 用户可能正看着，
+    // 给 2 秒缓冲避免闪烁。
+    if (!sysBadge.hidden) {
+      clearTimeout(sysBadgeHideTimer);
+      sysBadgeHideTimer = setTimeout(() => { sysBadge.hidden = true; }, 2000);
+    }
+    return;
+  }
+
+  clearTimeout(sysBadgeHideTimer);
+  const worst = status.alerts.find((a) => a.level === 'crit') || status.alerts[0];
+  sysBadge.textContent = (LEVEL_ICON[worst.kind] || '⚠') + ' ' + worst.text;
+  sysBadge.dataset.level = worst.level;
+  sysBadge.hidden = false;
+}
+
+// 主进程推送的警报：弹一次气泡，比角落小字更容易被注意到
+window.pet.onAlert ? window.pet.onAlert((a) => {
+  if (!a || !a.text) return;
+  showBubble(a.text, 8000);
+}) : null;
 
 // ---- 悬停：接管鼠标（否则点不到它）----
 let hoverTimer = 0;

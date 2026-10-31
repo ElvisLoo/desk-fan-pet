@@ -206,3 +206,38 @@ body.dragging { cursor: grabbing; }
 /* 攀爬时扇叶转慢一点，像在费力往上爬 */
 .pet[data-state="climb"] .blades { animation-duration: 2.6s; animation-play-state: running; }
 .pet[data-state="climb"] .body { animation: none; }
+
+/* ---------- 系统状态徽标 ----------
+   常态隐藏，只有越过阈值才出现。
+   常驻的百分比数字会变成视觉噪音，用户几天后就自动忽略了。 */
+.sys-badge {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+  padding: 2px 8px;
+  border-radius: 999px;
+  font: 600 10.5px/1.3 "Microsoft YaHei UI", system-ui, sans-serif;
+  color: #fff;
+  white-space: nowrap;
+  background: rgba(245, 158, 11, .95);   /* warn：琥珀 */
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .28);
+  letter-spacing: .01em;
+  pointer-events: none;
+  animation: sys-in .22s ease-out;
+}
+.sys-badge[data-level="crit"] {
+  background: rgba(239, 68, 68, .96);   /* crit：红 */
+  animation: sys-in .22s ease-out, sys-pulse 1.6s ease-in-out infinite;
+}
+.sys-badge[hidden] { display: none; }
+
+@keyframes sys-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-4px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+/* 红色状态轻微呼吸，但不剧烈 —— 桌面上持续抖动会让人分心 */
+@keyframes sys-pulse {
+  0%, 100% { box-shadow: 0 2px 10px rgba(0, 0, 0, .28); }
+  50%      { box-shadow: 0 2px 14px rgba(239, 68, 68, .55); }
+}

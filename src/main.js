@@ -12,6 +12,7 @@ const { app, BrowserWindow, ipcMain, Tray, Menu, screen, nativeImage, globalShor
 const os = require('os');
 const { PetBrain, STATE, MODE } = require('./pet-brain');
 const { Config } = require('./config');
+const sysStatus = require('./system-status');
 const { createPetIcon } = require('./pet-icon');
 
 const PET_W = 150;
@@ -33,6 +34,82 @@ let hovering = false;
 // HKCU 下写入，只影响当前用户，不需要管理员。
 const AUTOSTART_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
 const AUTOSTART_NAME = 'DeskFanPet';
+
+// ---------- 系统状态采集 ----------
+
+/**
+ * 内存：os.totalmem/freemem 在所有平台都有，零依赖。
+ * 注意 freemem 在 Windows 上是"可用"（含缓存可回收部分），
+ * 比任务管理器的"可用"略高，但对"是否吃紧"这个判断足够。
+ */
+function readMemory() {
+  try {
+    const total = os.totalmem();
+    const free = os.freemem();
+    if (!total) return null;
+    const used = total - free;
+    return {
+      usedRatio: used / total,
+      usedGb: used / 1024 ** 3,
+      totalGb: total / 1024 ** 3,
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * 电量：Node 没有内置接口，Windows 上用 WMI 查询。
+ *
+ * 为什么不用 PowerShell：每次启动一个 powershell.exe 要 200-400ms，
+ * 每 2 秒跑一次会明显可见地吃 CPU —— 一个"监控系统状态"的功能
+ * 自己成为负担就本末倒置了。
+ * 这里用 WMIC 一次性输出，读取超时也设上限。
+ *
+ * 台式机没有电池，查询会失败或返回空，返回 null 即可（界面不显示）。
+ */
+let batteryProbed = false;
+let batterySupported = true;
+let batteryCache = null;
+let batteryCacheAt = 0;
+
+function readBattery() {
+  if (process.platform !== 'win32') return null;
+  if (!batterySupported) return null;
+
+  const now = Date.now();
+  // 电量变化慢，15 秒缓存一次足够，避免频繁起子进程
+  if (now - batteryCacheAt < 15000) return batteryCache;
+
+  batteryCacheAt = now;
+  try {
+    const { execFileSync } = require('child_process');
+    const out = execFileSync('wmic', ['path', 'Win32_Battery', 'get',
+      'EstimatedChargeRemaining,BatteryStatus', '/format:list'],
+    { encoding: 'utf8', windowsHide: true, timeout: 3000 });
+
+    const pctMatch = out.match(/EstimatedChargeRemaining=(\d+)/);
+    const statMatch = out.match(/BatteryStatus=(\d+)/);
+    if (!pctMatch) {
+      // 没有电池（台式机）或查询失败：以后不再尝试，省掉每 15 秒一次的子进程
+      batterySupported = false;
+      batteryCache = null;
+      return null;
+    }
+    // BatteryStatus: 2 = 接通电源充电中（AC）
+    const charging = statMatch ? statMatch[1] === '2' : false;
+    batteryCache = {
+      percent: Number(pctMatch[1]),
+      charging,
+      minutesLeft: null,   // WMI 这个字段不可靠，宁可不显示也不给错值
+    };
+    return batteryCache;
+  } catch (_) {
+    batterySupported = false;
+    batteryCache = null;
+    return null;
+  }
+}
 
 function autostartEnabled() {
   if (process.platform !== 'win32') return false;
@@ -210,7 +287,10 @@ function createCpuSampler() {
 function startLoop() {
   lastTickAt = Date.now();
   const sampleCpu = createCpuSampler();
+  const cpuAvg = new sysStatus.CpuAverager({ windowSize: 5 });
+  const alertGate = new sysStatus.AlertGate({ cooldownMs: 10 * 60 * 1000 });
   let lastCpuAt = 0;
+  let status = { items: [], level: 'ok', alerts: [] };
   timer = setInterval(() => {
     if (!win || win.isDestroyed()) return;
     const now = Date.now();
@@ -220,7 +300,24 @@ function startLoop() {
     // 每 2 秒采一次 CPU，避免采样本身占资源
     if (now - lastCpuAt > 2000) {
       lastCpuAt = now;
-      brain.setLoad(sampleCpu(), 2000);
+      const raw = sampleCpu();
+      brain.setLoad(raw, 2000);
+
+      // 系统状态：CPU 用平滑值（单次尖峰不该让宠物报警），
+      // 内存/电量直接读（它们本身变化就慢）
+      status = sysStatus.summarize({
+        battery: readBattery(),
+        memory: readMemory(),
+        cpu: cpuAvg.push(raw),
+      });
+
+      // 警报去抖：内存 85% 会持续很久，每帧提醒等于骚扰
+      const fresh = alertGate.filter(status.alerts);
+      for (const a of fresh) {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('pet:alert', a);
+        }
+      }
     }
 
     const d = screen.getPrimaryDisplay();
@@ -239,6 +336,8 @@ function startLoop() {
       spin: brain.spin,
       edge: brain.edge,
       climbDir: brain.climbDir,
+      // 系统状态：渲染层据此显示角标与图标
+      status,
     });
   }, 50);
   timer.unref?.();
