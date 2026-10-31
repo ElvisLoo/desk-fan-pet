@@ -66,7 +66,12 @@ class PetBrain {
     this.x = 0.5;              // 0..1，相对可用区域
     this.y = 0.75;
     this.facing = 1;           // 1 朝右，-1 朝左
-    const t0 = Number.isFinite(opts.now) ? opts.now : Date.now();
+    // 统一时钟。原来各方法的 `now = Date.now()` 默认参数直接读系统时间，
+    // 与构造时注入的 now 是两套来源 —— 系统校时或用户改时间后，
+    // modeRemaining 会算出十几亿毫秒这种荒谬值。
+    this._clock = typeof opts.clock === 'function' ? opts.clock
+      : (typeof opts.now === 'function' ? opts.now : () => Date.now());
+    const t0 = typeof opts.now === 'function' ? opts.now() : (Number.isFinite(opts.now) ? opts.now : this._clock());
     this.lastInteractAt = t0;
     this.stateSince = t0;
     this.targetX = null;       // 走路目标
@@ -90,7 +95,7 @@ class PetBrain {
   }
 
   /** 切状态，并记录进入时间 */
-  setState(s, now = Date.now()) {
+  setState(s, now = this._clock()) {
     if (this.state === s) return;
     if (s === STATE.SLEEP) this.stats.slept++;
     this.state = s;
@@ -98,12 +103,12 @@ class PetBrain {
     if (s === STATE.WALK) this.stats.walks++;
   }
 
-  touch(now = Date.now()) {
+  touch(now = this._clock()) {
     this.lastInteractAt = now;
     if (this.state === STATE.SLEEP) this.setState(STATE.IDLE, now);
   }
 
-  click(now = Date.now()) {
+  click(now = this._clock()) {
     this.touch(now);
     // 贴在边上时点一下 = 让它下来
     if (this.edge !== EDGE.NONE) this.detachFromEdge(now);
@@ -115,12 +120,12 @@ class PetBrain {
   }
 
   /** 拖拽开始 / 结束 */
-  dragStart(now = Date.now()) {
+  dragStart(now = this._clock()) {
     this.touch(now);
     this.setState(STATE.DRAG, now);
   }
 
-  dragEnd(x, y, now = Date.now(), env = {}) {
+  dragEnd(x, y, now = this._clock(), env = {}) {
     this.x = clamp01(x);
     this.y = clamp01(y);
     this.attachToEdge(env, now);
@@ -134,7 +139,7 @@ class PetBrain {
    * 为什么要限制在左右：上下边缘贴上去会盖住任务栏或标题栏，
    * 而左右两侧通常是空的，宠物挂在那里最不碍事。
    */
-  attachToEdge(env = {}, now = Date.now()) {
+  attachToEdge(env = {}, now = this._clock()) {
     const sw = env.screenW || 1920;
     const pw = env.petW || 150;
     const m = this.opts.edgeMarginPx;
@@ -153,7 +158,7 @@ class PetBrain {
   }
 
   /** 从边缘放下来 */
-  detachFromEdge(now = Date.now()) {
+  detachFromEdge(now = this._clock()) {
     if (this.edge === EDGE.NONE) return;
     this.edge = EDGE.NONE;
     // 离开边缘一点点，避免下次 tick 又被判成贴上
@@ -162,7 +167,7 @@ class PetBrain {
   }
 
   /** 全屏应用时隐藏，避免挡住演示 */
-  setHidden(hidden, now = Date.now()) {
+  setHidden(hidden, now = this._clock()) {
     if (hidden) this.setState(STATE.HIDDEN, now);
     else this.setState(STATE.IDLE, now);
   }
@@ -180,7 +185,7 @@ class PetBrain {
   }
 
   /** 开始番茄钟 */
-  startFocus(now = Date.now()) {
+  startFocus(now = this._clock()) {
     this.mode = MODE.FOCUS;
     this.modeSince = now;
     this.reminder = null;
@@ -188,14 +193,14 @@ class PetBrain {
   }
 
   /** 结束番茄钟（提前放弃也算） */
-  stopFocus(now = Date.now()) {
+  stopFocus(now = this._clock()) {
     this.mode = MODE.FREE;
     this.modeSince = now;
     this.reminder = null;
   }
 
   /** 距离本轮结束还有多少毫秒 */
-  modeRemaining(now = Date.now()) {
+  modeRemaining(now = this._clock()) {
     if (this.mode === MODE.FOCUS) {
       return Math.max(0, this.opts.focusMs - (now - this.modeSince));
     }
@@ -210,7 +215,7 @@ class PetBrain {
    * @param {number} dtMs 距上一帧的毫秒数
    * @param {object} env 环境：{screenW, screenH, petW, petH}
    */
-  tick(dtMs, env = {}, now = Date.now()) {
+  tick(dtMs, env = {}, now = this._clock()) {
     const act = { moveTo: null, state: this.state, reminder: null };
     if (this.state === STATE.HIDDEN) return act;
 
@@ -233,7 +238,19 @@ class PetBrain {
 
     // —— 喝水提醒（专注时也提醒，但休息中不叠加）——
     if (this.mode !== MODE.BREAK && now >= this.nextSipAt) {
-      this.nextSipAt = now + this.opts.sipIntervalMs;
+      // 关键：nextSipAt 必须从"上一次该提醒的时间"往后推，
+      // 而不是从 now 推。休眠 3 小时唤醒时，从 now 推是对的，
+      // 但如果不夹紧会连续触发 —— 因为下一轮 tick 的 now 又变大了。
+      // 这里先把 nextSipAt 一次推到 now 之后的第一个周期点，
+      // 保证一小时内最多触发一次。
+      const interval = this.opts.sipIntervalMs;
+      const missed = Math.floor((now - this.nextSipAt) / interval) + 1;
+      this.nextSipAt = this.nextSipAt + missed * interval;
+      // 已经晚了很久（比如唤醒后才发现）就不要补发了：
+      // 用户不需要知道"你三小时前该喝水"
+      if (now - this.nextSipAt < -interval) {
+        this.nextSipAt = now + interval;
+      }
       this.stats.sips++;
       this.reminder = { kind: 'sip', until: now + this.opts.sipRemindMs };
     }
