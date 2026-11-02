@@ -13,6 +13,7 @@ const os = require('os');
 const { PetBrain, STATE, MODE } = require('./pet-brain');
 const { Config } = require('./config');
 const sysStatus = require('./system-status');
+const fullscreenDetect = require('./fullscreen');
 const { createPetIcon } = require('./pet-icon');
 
 const PET_W = 150;
@@ -465,13 +466,45 @@ ipcMain.handle('pet:state', () => ({
 
 // 全屏应用时隐藏（Windows 下用窗口层级近似：检测前台窗口是否全屏）
 function watchFullscreen() {
+  // 任务栏设成「自动隐藏」时，原本的近似判断会一直认为处于全屏，
+  // 宠物于是永远隐身，而用户完全不知道为什么。
+  // 先探一次任务栏状态，决定用哪种判定方式。
+  let autohide = false;
+  let useNative = true;
+  try {
+    autohide = fullscreenDetect.isTaskbarAutohide();
+    if (autohide) {
+      console.log('[pet] 检测到任务栏自动隐藏，改用前台窗口检测全屏');
+    }
+  } catch (_) {}
+
   setInterval(() => {
     if (!win || win.isDestroyed()) return;
     const d = screen.getPrimaryDisplay();
-    const cur = d.workAreaSize;
-    const full = d.size;
-    // 任务栏被占满 ⇒ 大概率有全屏应用
-    const isFullscreen = cur.height >= full.height - 2;
+    let isFullscreen = false;
+
+    if (useNative) {
+      const rect = fullscreenDetect.queryForegroundFullscreen();
+      if (rect === null) {
+        // PowerShell 不可用/被策略禁用：退回近似判断并永久关闭原生路径，
+        // 避免每 3 秒起一次失败的子进程
+        useNative = false;
+      } else if (rect.left === 0 && rect.right === 0) {
+        // 前台是桌面（没有真实窗口）
+        isFullscreen = false;
+      } else {
+        isFullscreen = fullscreenDetect.coversScreen(rect, d.bounds);
+      }
+    }
+
+    if (!useNative) {
+      isFullscreen = fullscreenDetect.isFullscreenByWorkArea({
+        workH: d.workAreaSize.height,
+        screenH: d.size.height,
+        taskbarAutohide: autohide,
+      });
+    }
+
     if (brain.mode !== MODE.FREE) refreshTrayMenu();
     if (isFullscreen && brain.state !== STATE.HIDDEN) { win.hide(); brain.setHidden(true); }
     else if (!isFullscreen && brain.state === STATE.HIDDEN && visible) { win.showInactive(); brain.setHidden(false); }
