@@ -13,4 +13,16 @@ contextBridge.exposeInMainWorld('pet', {
   dragEnd: (p) => ipcRenderer.invoke('pet:dragEnd', p),
   moveTo: (x, y) => ipcRenderer.send('pet:move', { x, y }),
   state: () => ipcRenderer.invoke('pet:state'),
+
+  // ---- 四叶草菜单 ----
+  setPinned: (on) => ipcRenderer.send('pet:pin', !!on),
+  memoryInfo: () => ipcRenderer.invoke('tool:memory'),
+  cleanMemory: () => ipcRenderer.invoke('tool:cleanMemory'),
+  askAI: (text, history) => ipcRenderer.invoke('tool:ai', text, history),
+  pomodoroStart: () => ipcRenderer.invoke('tool:pomo', 'start'),
+  pomodoroPause: () => ipcRenderer.invoke('tool:pomo', 'pause'),
+  pomodoroSkip: () => ipcRenderer.invoke('tool:pomo', 'skip'),
+  pomodoroReset: () => ipcRenderer.invoke('tool:pomo', 'reset'),
+  pomodoroState: () => ipcRenderer.invoke('tool:pomoState'),
+  fortune: () => ipcRenderer.invoke('tool:fortune'),
 });

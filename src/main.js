@@ -13,12 +13,17 @@ const os = require('os');
 const { PetBrain, STATE, MODE } = require('./pet-brain');
 const { Config } = require('./config');
 const { DiaryStore } = require('./diary-store');
+const QT = require('./quick-tools');
+const { EdgeHide } = require('./edge-hide');
 const sysStatus = require('./system-status');
 const fullscreenDetect = require('./fullscreen');
 const { createPetIcon } = require('./pet-icon');
 
-const PET_W = 150;
-const PET_H = 150;
+// 窗口尺寸：原 150×150 只够放风扇本体。
+// 四叶草展开后占 114×114，功能面板宽 244px，都会超出 150 被裁掉。
+// 260×340 的布局：风扇贴底(约 128px)，菜单居中偏上，面板占上半区。
+const PET_W = 260;
+const PET_H = 340;
 
 // 渲染进程崩溃的自动恢复上限：够覆盖偶发崩溃，又不至于无限重启
 const MAX_CRASH_RELOAD = 3;
@@ -180,6 +185,22 @@ let diary = null;
 // 必须放在模块级 —— 写日记的是 watchFullscreen 的 interval，
 // 不是 tick，两者不在同一个函数作用域里。
 let lastStats = { clicks: 0, walks: 0, slept: 0, focusDone: 0, sips: 0 };
+// 四叶草面板的番茄钟（跨面板关闭也继续走）
+let pomodoro = null;
+// 菜单展开时钉住，贴边逻辑不收回窗口
+let panelPinned = false;
+// 贴边收起：把窗口推到屏幕外只留一条边，鼠标碰一下弹回
+// 窗口 260 宽，风扇只有 108 宽且居中 —— 两侧各 76px 是透明留白。
+// contentInset/contentWidth 必须传，否则收起时露出的是留白而不是风扇。
+const FAN_W = 108;
+const edgeHide = new EdgeHide({
+  peekPx: 28,
+  graceMs: 420,
+  contentInsetPx: (PET_W - FAN_W) / 2,
+  contentWidthPx: FAN_W,
+});
+let edgeTimer = null;
+let currentSide = 'none';
 function initConfig() {
   cfg = new Config(path.join(app.getPath('userData'), 'pet-config.json'));
   // 每日小记：单独一个文件，不跟配置混在一起
@@ -541,6 +562,10 @@ ipcMain.handle('pet:dragEnd', (_e, p) => {
   // 松手即记：这是唯一"用户明确表达了意图"的时刻。
   // 边爬边动的不记，否则会被攀爬动画写进一堆中间坐标。
   savePosition();
+
+  // 拖到离边缘很近时，进入"贴边收起"模式
+  applyEdgeHide(p);
+
   return { ok: true, edge: brain.edge, state: brain.state };
 });
 // 拖拽过程中实时移动窗口。用 send（不等待回执）而不是 invoke，
@@ -558,6 +583,218 @@ ipcMain.on('pet:move', (_e, p) => {
   const cy = Math.min(a.height - DRAG_BOUND, Math.max(0, y));
   win.setPosition(cx, cy, false);
 });
+
+// ---------- 四叶草菜单 ----------
+
+ipcMain.on('pet:pin', (_e, on) => {
+  panelPinned = !!on;
+  // 面板打开时钉住：既让贴边不收回，也保证鼠标能移进去点
+  edgeHide.setPinned(panelPinned);
+  if (panelPinned) edgeHide.enter(Date.now());
+});
+
+// ---------- 贴边收起 ----------
+
+/**
+ * 拖拽松手后判断要不要贴边。
+ * 只在「离屏幕左右边缘 28px 以内」时触发，避免误触。
+ */
+function applyEdgeHide(pos) {
+  if (!win || win.isDestroyed()) return;
+  const d = screen.getPrimaryDisplay();
+  const b = d.workArea;
+
+  const gapLeft = pos.x - b.x;
+  const gapRight = (b.x + b.width) - (pos.x + PET_W);
+
+  if (gapLeft <= 28) {
+    currentSide = 'left';
+    edgeHide.attach('left');
+  } else if (gapRight <= 28) {
+    currentSide = 'right';
+    edgeHide.attach('right');
+  } else {
+    currentSide = 'none';
+    edgeHide.detach();
+    return;
+  }
+  edgeHide.leave(Date.now() - edgeHide.opts.graceMs);   // 允许立刻收起
+  applyEdgeGeometry();
+}
+
+/** 按当前收起状态摆放窗口 */
+function applyEdgeGeometry() {
+  if (!win || win.isDestroyed()) return;
+  const d = screen.getPrimaryDisplay();
+  const b = d.workArea;
+  const rect = win.getBounds();
+
+  if (currentSide === 'none') {
+    if (edgeHide.collapsed) edgeHide.collapsed = false;
+    return;
+  }
+
+  const g = edgeHide.collapsed
+    ? edgeHide.collapsedGeometry(rect, b.width)
+    : edgeHide.expandedGeometry(rect, b.width);
+
+  // 纵向保持原位，只动横向
+  win.setBounds({ x: Math.round(g.x), y: rect.y, width: rect.width, height: rect.height }, false);
+}
+
+/**
+ * 每 120ms 看一次鼠标位置：
+ *   碰到露出的一条边 → 弹出；离开够久 → 缩回。
+ * 用轮询而不是 mouseenter，是因为窗口缩到屏幕外时
+ * 渲染层收不到事件，只能由主进程读系统光标位置。
+ */
+function startEdgeWatcher() {
+  if (edgeTimer) clearInterval(edgeTimer);
+  let wasCollapsed = false;
+
+  edgeTimer = setInterval(() => {
+    if (!win || win.isDestroyed() || currentSide === 'none') return;
+
+    const d = screen.getPrimaryDisplay();
+    const b = d.workArea;
+    const rect = win.getBounds();
+    const pt = screen.getCursorScreenPoint();
+
+    // 收起状态下：光标进入露出区域就展开
+    if (edgeHide.collapsed) {
+      const peekHit =
+        (currentSide === 'left' && pt.x <= b.x + edgeHide.opts.hotZonePx) ||
+        (currentSide === 'right' && pt.x >= b.x + b.width - edgeHide.opts.hotZonePx);
+      const inVertical = pt.y >= rect.y - 4 && pt.y <= rect.y + rect.height + 4;
+
+      if (peekHit && inVertical) {
+        edgeHide.enter(Date.now());
+        applyEdgeGeometry();
+        setThrough(false);
+        wasCollapsed = true;
+        return;
+      }
+      return;
+    }
+
+    // 展开状态：光标离开窗口范围就准备收回
+    const inside = pt.x >= rect.x - 6 && pt.x <= rect.x + rect.width + 6 &&
+                   pt.y >= rect.y - 6 && pt.y <= rect.y + rect.height + 6;
+    if (!inside && !panelPinned) {
+      edgeHide.leave(Date.now());
+    } else {
+      edgeHide.enter(Date.now());
+    }
+
+    if (edgeHide.tick(Date.now()) && wasCollapsed === false) {
+      applyEdgeGeometry();
+      setThrough(true);   // 收起后鼠标穿透，不挡桌面
+      wasCollapsed = true;
+    } else if (!edgeHide.collapsed) {
+      wasCollapsed = false;
+    }
+  }, 120);
+  edgeTimer.unref?.();
+}
+
+// 注意：pet:pin 的监听已经在「四叶草菜单」段注册过。
+// 这里再注册一次会让后面的覆盖前面的，setPinned 就不生效了 ——
+// 面板打开时仍会被贴边逻辑收走。
+
+ipcMain.handle('tool:memory', () => {
+  const total = os.totalmem();
+  const free = os.freemem();
+  const a = QT.analyzeMemory({ total, free });
+  return {
+    ...a,
+    usedText: QT.formatBytes(a.used),
+    totalText: QT.formatBytes(a.total),
+    freeText: QT.formatBytes(a.free),
+    canFreeText: QT.formatBytes(a.canFree),
+  };
+});
+
+/**
+ * 清理内存。
+ *
+ * 诚实说明：Node 能做的只有「让本进程交出可回收的内存」，
+ * 没法真的去清别的程序。这里做两件有实际作用的事：
+ *   1. 触发 V8 垃圾回收（--expose-gc 未开启时降级为无害的分配释放）
+ *   2. 清掉 Electron 的会话缓存
+ * 然后重新读一次真实占用，把实际变化告诉用户，而不是编一个"释放了 2.3GB"。
+ */
+ipcMain.handle('tool:cleanMemory', async () => {
+  const before = os.freemem();
+  try {
+    if (global.gc) global.gc();
+    if (win && !win.isDestroyed() && win.webContents) {
+      await win.webContents.session.clearCache();
+    }
+  } catch (_) {}
+  // 给系统一点时间回收
+  await new Promise((r) => setTimeout(r, 600));
+  const after = os.freemem();
+  const delta = Math.max(0, after - before);
+  return {
+    ok: true,
+    reclaimed: delta,
+    reclaimedText: delta > 1024 * 1024 ? QT.formatBytes(delta) : '',
+  };
+});
+
+ipcMain.handle('tool:ai', async (_e, text, history) => {
+  const cfg = (cfg && cfg.get('ai')) || {};
+  const baseUrl = String(cfg.baseUrl || '').trim();
+  const apiKey = String(cfg.apiKey || '').trim();
+
+  // 没配端点时用本地回答，不假装能联网
+  if (!baseUrl) {
+    return { text: QT.localReply(text), local: true };
+  }
+
+  const body = QT.buildChatRequest(cfg, history, text);
+  try {
+    const url = baseUrl.replace(/\/+$/, '') + '/chat/completions';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(apiKey ? { Authorization: 'Bearer ' + apiKey } : {}),
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!res.ok) {
+      return { text: '接口返回 ' + res.status + '，检查一下地址和 Key。', local: true };
+    }
+    const json = await res.json();
+    const reply = QT.extractReply(json);
+    return { text: reply || '模型没给内容，再问一次试试。', local: false };
+  } catch (e) {
+    return { text: '连不上模型：' + String((e && e.message) || e).slice(0, 60), local: true };
+  }
+});
+
+function pomo() {
+  if (!pomodoro) pomodoro = new QT.Pomodoro();
+  return pomodoro;
+}
+
+ipcMain.handle('tool:pomo', (_e, action) => {
+  const p = pomo();
+  const now = Date.now();
+  if (action === 'start') return p.start(now);
+  if (action === 'pause') return p.pause(now);
+  if (action === 'skip') return p.skip(now);
+  if (action === 'reset') return p.reset();
+  return p.snapshot();
+});
+
+ipcMain.handle('tool:pomoState', () => pomo().tick(Date.now()).changed
+  ? pomo().snapshot()
+  : pomo().snapshot());
+
+ipcMain.handle('tool:fortune', () => QT.dailyFortune(new Date()));
 
 ipcMain.handle('pet:state', () => ({
   state: brain.state, mood: brain.mood, stats: brain.stats,
@@ -674,6 +911,7 @@ app.on('window-all-closed', () => { /* 托盘常驻 */ });
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   if (timer) clearInterval(timer);
+  if (edgeTimer) clearInterval(edgeTimer);
   // 退出前再存一次：用户可能拖完立刻关电脑，晚于拖动的那次保存
   savePosition();
   // 日记是节流写盘的，退出时把没落盘的部分补上，否则会丢最后几秒的记录

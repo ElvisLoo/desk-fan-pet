@@ -23,6 +23,8 @@ body.dragging { cursor: grabbing; }
   position: relative;
   padding-bottom: 6px;
 }
+/* 菜单/面板展开时，风扇稍微缩一点，给出视觉层次 */
+.pet.menu-open .body-flip { transform: scale(.88); transition: transform .22s ease; }
 
 /* ---------- 身体 ---------- */
 .body-flip {
@@ -247,3 +249,319 @@ body.dragging { cursor: grabbing; }
   0%, 100% { box-shadow: 0 2px 10px rgba(0, 0, 0, .28); }
   50%      { box-shadow: 0 2px 14px rgba(239, 68, 68, .55); }
 }
+
+/* =========================================================
+   四叶草菜单
+   四片叶子绕中心排布，鼠标悬停时从中心绽开。
+   用 border-radius 单角做大圆角做出叶片形状，不依赖图片。
+   ========================================================= */
+.clover {
+  position: absolute;
+  /* 菜单放在风扇上方的空白区，不与本体重叠 */
+  left: 50%; top: 172px;
+  width: 0; height: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+.clover[hidden] { display: none; }
+
+.leaf {
+  position: absolute;
+  width: 46px; height: 46px;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  /* 用纯色而不是渐变：渐变方向固定，四个圆重叠时会因明暗不同
+     显出弧线接缝，看起来是"四个圆叠着"而不是"一朵草" */
+  background: #34d399;
+  color: #052e16;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 1px;
+  font-family: inherit;
+  /* 不用向外扩散的绿光：在浅背景上会晕成两圈，像发光球而不是按钮。
+     改用内高光 + 极短投影，观感是"实心凸起"。 */
+  box-shadow: inset 0 -2px 0 rgba(6, 78, 59, .15),
+              inset 0 1px 0 rgba(255, 255, 255, .4),
+              0 1px 2px rgba(6, 78, 59, .18);
+  pointer-events: auto;
+  /* 从中心绽开：初始缩到 0 并贴住中心 */
+  transform: translate(-50%, -50%) scale(.2);
+  opacity: 0;
+  transition: transform .26s cubic-bezier(.34, 1.56, .64, 1),
+              opacity .18s ease,
+              box-shadow .18s ease;
+  /* 叶片形状：朝中心那个角收成小圆角，其余三个角用大圆角，
+     看上去像一片心形叶尖指着花心。四片的朝向必须各自对称，
+     否则会出现「一片圆一片缺角」的参差感。 */
+}
+/* 顺序：左上 右上 右下 左下 */
+/* 四叶草 = 四个圆瓣围着中心。
+   三个角做半径只会得到"带尾巴的气泡"，读不出叶片感；
+   圆瓣反而最接近真实四叶草的形态。 */
+.leaf-tl, .leaf-tr, .leaf-bl, .leaf-br { border-radius: 50%; }
+
+/* 展开：四片叶子沿对角线推开 */
+.clover.open .leaf {
+  opacity: 1;
+}
+/* 花瓣直径 46（半径 23）。位移 22px 时四瓣在中心重叠 1px，
+   连成一整朵四叶草；位移 26px 会留出缝，看起来变成四个独立按钮。 */
+.clover.open .leaf-tl { transform: translate(calc(-50% - 20px), calc(-50% - 20px)) scale(1); }
+.clover.open .leaf-tr { transform: translate(calc(-50% + 20px), calc(-50% - 20px)) scale(1); }
+.clover.open .leaf-bl { transform: translate(calc(-50% - 20px), calc(-50% + 20px)) scale(1); }
+.clover.open .leaf-br { transform: translate(calc(-50% + 20px), calc(-50% + 20px)) scale(1); }
+
+.leaf:hover {
+  box-shadow: inset 0 -2px 0 rgba(6, 78, 59, .22),
+              inset 0 1px 0 rgba(255, 255, 255, .45);
+  filter: brightness(1.07);
+}
+.leaf:active { transform-origin: center; filter: brightness(.95); }
+
+.leaf-ico {
+  /* SVG 走 currentColor，颜色跟着按钮文字走，四个图标天然统一 */
+  display: block;
+  color: #064e3b;
+  opacity: .9;
+}
+.leaf-label {
+  font-size: 9px;
+  letter-spacing: .02em;
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* 中心的四叶草按钮本身 */
+.clover-core {
+  position: absolute;
+  left: 50%; top: 50%;
+  /* 24px：足够盖住四瓣交界处的缝，读作"花心"而不是漂浮的小点 */
+  width: 24px; height: 24px;
+  margin: -12px 0 0 -12px;
+  border-radius: 50%;
+  /* 与叶片同色系、略深一档：像叶片交汇处的自然收口 */
+  background: radial-gradient(circle at 40% 35%, #6ee7a0, #16a34a);
+  box-shadow: none;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .2s;
+  z-index: 2;
+}
+/* 四瓣在 20px 位移下中心重叠 6px，本来就没有缝。
+   中间再放任何圆点都是多余的第五个元素，保持隐藏。 */
+.clover-core { display: none; }
+
+/* 番茄钟运行时的角标 */
+.clover-badge {
+  position: absolute;
+  /* 紧贴花瓣上沿：花瓣顶边在 clover 中心 -21-23=-44px，
+     角标高 12px，放 -62px 正好留 6px 间隙 */
+  left: 50%; top: -58px;
+  transform: translateX(-50%);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 99px;
+  background: rgba(220, 38, 38, .92);
+  color: #fff;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+}
+.clover-badge.show { opacity: 1; }
+
+/* =========================================================
+   功能面板
+   ========================================================= */
+.tool-panel {
+  position: absolute;
+  left: 50%; top: 6px;
+  transform: translateX(-50%);
+  width: 244px;
+  /* 高度跟着内容走：固定高度会让内容少的工具（运势）底部空一大块。
+     上限 216px 防止 AI 对话撑破窗口。 */
+  max-height: 216px;
+  background: rgba(24, 24, 27, .96);
+  color: #e4e4e7;
+  border-radius: 12px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, .45);
+  border: 1px solid rgba(255, 255, 255, .09);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  z-index: 60;
+  font-size: 11.5px;
+  -webkit-app-region: no-drag;
+}
+.tool-panel[hidden] { display: none; }
+
+.tp-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
+  flex-shrink: 0;
+}
+.tp-title { font-size: 11.5px; font-weight: 600; letter-spacing: .03em; }
+.tp-close {
+  border: 0; background: transparent; color: #a1a1aa;
+  font-size: 15px; line-height: 1; cursor: pointer;
+  padding: 0 2px; border-radius: 4px;
+}
+.tp-close:hover { color: #f4f4f5; background: rgba(255, 255, 255, .1); }
+
+.tp-body {
+  padding: 9px 10px 10px;
+  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.tp-body::-webkit-scrollbar { width: 5px; }
+.tp-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,.14); border-radius: 3px; }
+
+/* 内存面板 */
+.mem-row { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 5px; }
+.mem-used {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  display: inline-flex; align-items: baseline; gap: 3px;
+}
+/* 数字用大字，单位缩到 10px —— 等宽字体下同字号会让 "13.0 GB"
+   中间空出一整个字符宽，像两个独立的词 */
+.mem-used b {
+  font-size: 16px; font-weight: 600; color: #f4f4f5;
+  letter-spacing: -.02em;
+}
+.mem-used i {
+  font-style: normal;
+  font-size: 10px; color: #a1a1aa;
+  margin-left: 1px;
+}
+/* 大字旁边必须有小标签说明，否则 13.0 GB 到底是已用还是可用要靠猜 */
+.mem-used em {
+  font-family: var(--font-ui, inherit);
+  font-style: normal;
+  font-size: 9.5px;
+  color: #71717a;
+  letter-spacing: .04em;
+}
+.mem-pct { font-size: 10.5px; color: #a1a1aa; }
+.mem-bar {
+  height: 6px; border-radius: 99px;
+  /* 底槽要够亮才看得出"还剩多少"，.06 在深底上几乎消失 */
+  background: rgba(255, 255, 255, .18);
+  overflow: hidden; margin: 6px 0 8px;
+}
+.mem-bar > i {
+  display: block; height: 100%; width: 0;
+  border-radius: 99px;
+  background: linear-gradient(90deg, #34d399, #10b981);
+  transition: width .4s ease, background .4s ease;
+}
+.mem-bar.warn > i { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
+.mem-bar.high > i { background: linear-gradient(90deg, #f87171, #ef4444); }
+.mem-tip { font-size: 10.5px; color: #a1a1aa; line-height: 1.6; margin-bottom: 9px; }
+.mem-actions { display: flex; gap: 6px; padding-top: 9px; }
+.mem-btn {
+  flex: 1; border: 1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.05); color: #e4e4e7;
+  font-family: inherit; font-size: 10.5px;
+  padding: 5px 0; border-radius: 7px; cursor: pointer;
+}
+.mem-btn:hover { background: rgba(255,255,255,.12); }
+.mem-btn.primary {
+  /* 主操作统一用蓝：绿色在内存面板里代表"内存健康"，两处一起用会串味 */
+  background: rgba(59, 130, 246, .22);
+  border-color: rgba(59, 130, 246, .45);
+  color: #93c5fd;
+}
+.mem-btn.primary:hover { background: rgba(59, 130, 246, .34); }
+.mem-btn:disabled { opacity: .45; cursor: default; }
+
+/* AI 面板 */
+.ai-log {
+  height: 130px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 6px;
+  margin-bottom: 7px;
+  padding-right: 2px;
+}
+.ai-log::-webkit-scrollbar { width: 4px; }
+.ai-log::-webkit-scrollbar-thumb { background: rgba(255,255,255,.14); border-radius: 3px; }
+.ai-msg {
+  max-width: 88%; padding: 5px 9px; border-radius: 9px;
+  font-size: 11px; line-height: 1.55; word-break: break-word;
+}
+.ai-msg.user { align-self: flex-end; background: rgba(59,130,246,.28); color: #dbeafe; }
+.ai-msg.bot { align-self: flex-start; background: rgba(255,255,255,.08); color: #e4e4e7; }
+.ai-msg.hint { align-self: center; background: transparent; color: #71717a; font-size: 10px; }
+.ai-input-row { display: flex; gap: 5px; }
+.ai-input {
+  flex: 1; min-width: 0;
+  background: rgba(255,255,255,.07);
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 7px; color: #f4f4f5;
+  font-family: inherit; font-size: 11px;
+  padding: 5px 8px; outline: none;
+}
+.ai-input:focus { border-color: rgba(59,130,246,.55); }
+.ai-send {
+  border: 0; background: rgba(59,130,246,.75); color: #fff;
+  font-family: inherit; font-size: 11px;
+  padding: 5px 11px; border-radius: 7px; cursor: pointer;
+}
+.ai-send:hover { background: rgba(59,130,246,.95); }
+.ai-send:disabled { opacity: .5; cursor: default; }
+
+/* 番茄钟面板 */
+.pomo-time {
+  /* 不用等宽字体：等宽体里冒号占满一整格，
+     无论怎么收字距都会显出 "20 : 00" 的缝。
+     改用比例字体 + 等宽数字特性，数字仍然对齐、冒号自然收紧。 */
+  font-family: "Segoe UI", "PingFang SC", system-ui, sans-serif;
+  font-size: 31px; font-weight: 600;
+  text-align: center; color: #f4f4f5;
+  letter-spacing: -.01em;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  line-height: 1.15;
+  margin: 2px 0 1px;
+}
+.pomo-phase { text-align: center; font-size: 10.5px; color: #a1a1aa; margin-bottom: 3px; }
+.pomo-round { text-align: center; font-size: 10px; color: #71717a; margin-bottom: 9px; }
+.pomo-actions { display: flex; gap: 6px; padding-top: 10px; }
+/* 倒计时区在剩余空间里居中 */
+.pomo-phase, .pomo-time, .pomo-round { flex-shrink: 0; }
+
+/* 运势面板 */
+.fortune-level {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+}
+.fortune-seal {
+  width: 34px; height: 34px; border-radius: 8px;
+  display: grid; place-items: center;
+  font-size: 17px; font-weight: 700;
+  background: linear-gradient(145deg, #34d399, #059669);
+  color: #052e16; flex-shrink: 0;
+}
+.fortune-desc { font-size: 10.5px; color: #a1a1aa; line-height: 1.55; }
+.fortune-items { display: flex; flex-direction: column; gap: 3px; margin-top: 2px; }
+/* 运势内容不足时不要撑开，靠上排布即可 */
+.fortune-level { flex-shrink: 0; }
+.fortune-item {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 10.5px; line-height: 1.6;
+}
+.fortune-item b {
+  color: #71717a; font-weight: 400;
+  min-width: 36px; flex-shrink: 0;
+  /* 固定行高，避免中英文混排时两列基线错开 */
+  line-height: 1.6;
+}
+.fortune-item span { color: #e4e4e7; line-height: 1.6; }
+.fortune-yi { color: #6ee7b7 !important; }
+.fortune-ji { color: #fca5a5 !important; }
+
+/* 面板打开时把叶子收起来：244 宽的面板会盖住菜单，
+   两层叠着既看不清也点不准 */
+body.panel-open .clover { opacity: 0; pointer-events: none; }
+body.panel-open .clover .leaf { pointer-events: none; }
+.clover { transition: opacity .16s ease; }

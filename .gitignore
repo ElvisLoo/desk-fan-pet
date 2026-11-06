@@ -11,3 +11,7 @@ assets/icon-*.png
 __pycache__/
 *.pyc
 flip-check.png
+
+# 本地验收截图（诊断脚本产物）
+.qa-*.png
+.qa-screen*.png
