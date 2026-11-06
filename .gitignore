@@ -6,3 +6,7 @@ electron.log
 Thumbs.db
 dist/
 assets/icon-*.png
+
+# 误建的 Python 缓存（本项目是 Electron 项目）
+__pycache__/
+*.pyc

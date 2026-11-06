@@ -8,10 +8,11 @@
  *   3. 全屏应用时自动隐藏，不在你演示时冒出来。
  */
 const path = require('path');
-const { app, BrowserWindow, ipcMain, Tray, Menu, screen, nativeImage, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, screen, nativeImage, globalShortcut, dialog } = require('electron');
 const os = require('os');
 const { PetBrain, STATE, MODE } = require('./pet-brain');
 const { Config } = require('./config');
+const { DiaryStore } = require('./diary-store');
 const sysStatus = require('./system-status');
 const fullscreenDetect = require('./fullscreen');
 const { createPetIcon } = require('./pet-icon');
@@ -174,8 +175,17 @@ function savePosition() {
 
 // 配置只在 ready 之后创建（此时 userData 路径才确定）
 let cfg = null;
+let diary = null;
+// 上一次的计数快照：用增量而不是绝对值，避免重启后重复计入。
+// 必须放在模块级 —— 写日记的是 watchFullscreen 的 interval，
+// 不是 tick，两者不在同一个函数作用域里。
+let lastStats = { clicks: 0, walks: 0, slept: 0, focusDone: 0, sips: 0 };
 function initConfig() {
   cfg = new Config(path.join(app.getPath('userData'), 'pet-config.json'));
+  // 每日小记：单独一个文件，不跟配置混在一起
+  // （配置被用户重置时不该把使用记录一起清掉）
+  diary = new DiaryStore(path.join(app.getPath('userData'), 'pet-diary.json'));
+  diary.load();
   cfg.load();
   return cfg;
 }
@@ -360,6 +370,91 @@ function refreshTrayMenu() {
       focusItem.visible = false;
     }
   }
+
+  // 日记文案每次刷新时重算：用户在电脑前坐一整天，
+  // 数字应该跟着涨，而不是停在启动那一刻。
+  // 菜单对象要从托盘取，不能引用一个不存在的局部变量
+  const menu = tray.contextMenu || null;
+  if (menu && typeof menu.getMenuItemById === 'function') {
+    const dToday = menu.getMenuItemById('diaryToday');
+    const dWeek = menu.getMenuItemById('diaryWeek');
+    if (dToday) dToday.label = diaryTodayLabel();
+    if (dWeek) dWeek.label = diaryWeekLabel();
+  }
+}
+
+/**
+ * 托盘里的两行日记文案。
+ * 托盘菜单宽度有限，长句会被截断，所以这里做成短句。
+ */
+function diaryTodayLabel() {
+  try {
+    if (!diary) return '今日：还没记录';
+    const s = diary.summary();
+    const t = s.today;
+    const bits = [];
+    if (t.focusDone > 0) bits.push(t.focusDone + ' 个番茄钟');
+    if (t.sips > 0) bits.push('喝水 ' + t.sips);
+    if (t.clicks > 0) bits.push('被摸 ' + t.clicks);
+    if (!bits.length) return '今日：还没记录';
+    return '今日：' + bits.join(' · ');
+  } catch (_) {
+    return '今日：读取失败';
+  }
+}
+
+function diaryWeekLabel() {
+  try {
+    if (!diary) return '';
+    const s = diary.summary();
+    const m = s.month;
+    if (!m || !m.total) return '';
+    if (m.total.focusDone === 0 && m.total.sips === 0) return '';
+    const bits = [];
+    if (m.total.focusDone > 0) bits.push('本月 ' + m.total.focusDone + ' 个番茄钟');
+    if (s.streak > 1) bits.push('连续 ' + s.streak + ' 天');
+    return bits.join(' · ');
+  } catch (_) {
+    return '';
+  }
+}
+
+/** 完整小结弹窗：托盘放不下长文本，单独开一个小窗 */
+function showDiaryDialog() {
+  try {
+    if (!diary) return;
+    const s = diary.summary();
+    const t = s.today;
+    const m = s.month;
+
+    const lines = [
+      '今天',
+      '  完成番茄钟　' + t.focusDone + ' 个',
+      '  专注时长　　' + (t.focusMs ? (t.focusMs / 60000).toFixed(0) + ' 分钟' : '—'),
+      '  喝水提醒　　' + t.sips + ' 次',
+      '  被摸　　　　' + t.clicks + ' 下',
+      '  自己走动　　' + t.walks + ' 趟',
+      '',
+      '本月',
+      '  完成番茄钟　' + (m.total ? m.total.focusDone : 0) + ' 个',
+      '  累计专注　　' + (m.total && m.total.focusMs
+        ? (m.total.focusMs / 3600000).toFixed(1) + ' 小时' : '—'),
+      '  连续使用　　' + s.streak + ' 天',
+      '',
+      s.weekLine,
+    ];
+
+    dialog.showMessageBox({
+      type: 'info',
+      title: '使用小结',
+      message: '风扇宠物的使用记录',
+      detail: lines.join(String.fromCharCode(10)),
+      buttons: ['知道了'],
+      noLink: true,
+    });
+  } catch (e) {
+    console.error('[pet] 打开小结失败:', e && e.message);
+  }
 }
 
 function createTray() {
@@ -368,6 +463,10 @@ function createTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '摸摸它', click: () => { brain.click(); win?.webContents.send('pet:pat'); } },
     { label: '叫它过来', click: bringToCenter },
+    { type: 'separator' },
+    { label: diaryTodayLabel(), enabled: false, id: 'diaryToday' },
+    { label: diaryWeekLabel(), enabled: false, id: 'diaryWeek', visible: false },
+    { label: '查看完整小结…', click: showDiaryDialog },
     { type: 'separator' },
     { label: '开始专注（25 分钟）', click: () => { brain.startFocus(); refreshTrayMenu(); } },
     { label: '结束专注', click: () => { brain.stopFocus(); refreshTrayMenu(); } },
@@ -464,6 +563,29 @@ ipcMain.handle('pet:state', () => ({
   state: brain.state, mood: brain.mood, stats: brain.stats,
 }));
 
+/**
+ * 把 pet-brain 里的计数增量写进日记。
+ *
+ * 为什么要对比增量而不是直接读绝对值：
+ *   brain.stats 是本次进程内累加的，重启就归零；
+ *   日记是跨天跨进程累加的。直接写绝对值会把历史记录冲掉。
+ */
+function syncDiary(now, prev) {
+  if (!diary || !brain) return;
+  const cur = brain.stats;
+  for (const key of ['clicks', 'walks', 'slept', 'focusDone', 'sips']) {
+    const delta = (cur[key] || 0) - (prev[key] || 0);
+    if (delta > 0) {
+      const field = key;
+      // focusDone 同时折算 25 分钟专注时长
+      diary.bump(field, delta, now);
+      if (field === 'focusDone') {
+        diary.addFocus(delta * brain.opts.focusMs, now);
+      }
+    }
+  }
+}
+
 // 全屏应用时隐藏（Windows 下用窗口层级近似：检测前台窗口是否全屏）
 function watchFullscreen() {
   // 任务栏设成「自动隐藏」时，原本的近似判断会一直认为处于全屏，
@@ -480,6 +602,7 @@ function watchFullscreen() {
 
   setInterval(() => {
     if (!win || win.isDestroyed()) return;
+    const now = Date.now();
     const d = screen.getPrimaryDisplay();
     let isFullscreen = false;
 
@@ -504,6 +627,9 @@ function watchFullscreen() {
         taskbarAutohide: autohide,
       });
     }
+
+    syncDiary(now, lastStats);
+    lastStats = { ...brain.stats };
 
     if (brain.mode !== MODE.FREE) refreshTrayMenu();
     if (isFullscreen && brain.state !== STATE.HIDDEN) { win.hide(); brain.setHidden(true); }
@@ -550,5 +676,7 @@ app.on('will-quit', () => {
   if (timer) clearInterval(timer);
   // 退出前再存一次：用户可能拖完立刻关电脑，晚于拖动的那次保存
   savePosition();
+  // 日记是节流写盘的，退出时把没落盘的部分补上，否则会丢最后几秒的记录
+  try { if (diary) diary.flush(); } catch (_) {}
 });
 app.on('second-instance', () => { if (win) { win.showInactive(); bringToCenter(); } });
