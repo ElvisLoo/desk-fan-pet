@@ -12,6 +12,9 @@
     <!-- 情绪气泡 -->
     <div class="bubble" id="bubble" hidden></div>
 
+    <!-- 翻转层：朝向由内联 transform 控制；呼吸/跳跃动画在内层 .body 上，
+         两层分开才不会互相覆盖 -->
+    <div class="body-flip" id="bodyFlip">
     <div class="body">
       <!-- 风扇外壳 -->
       <div class="cage">
@@ -26,6 +29,7 @@
       </div>
       <div class="stand"></div>
       <div class="base"></div>
+    </div>
     </div>
 
     <!-- 睡觉时飘出的 Z -->

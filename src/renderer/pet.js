@@ -42,13 +42,21 @@ window.pet.onFrame((s) => {
   } else {
     lastReminderKey = '';
   }
-  // 朝向：贴在边缘时朝向屏幕内侧，攀爬时轻微倾斜
-  if (s.edge && s.edge !== 'none') {
-    const flip = s.edge === 'right' ? 'scaleX(-1)' : '';
-    const tilt = s.climbDir > 0 ? ' rotate(6deg)' : ' rotate(-6deg)';
-    document.body.style.transform = flip + tilt;
-  } else {
-    document.body.style.transform = s.facing < 0 ? 'scaleX(-1)' : '';
+  // 朝向：贴在边缘时朝向屏幕内侧，攀爬时轻微倾斜。
+  //
+  // 只翻转 #bodyFlip（风扇本体外层），不能翻转 body 元素或 .pet：
+  // 气泡里的文字和睡觉的 Z 是兄弟节点，跟着一起翻就变成镜像字了。
+  // 翻转必须放在外层容器：内层 .body 上有 breathe/jump 动画，
+  // 动画的 transform 会覆盖内联样式，直接设给它不会有任何效果。
+  const bodyEl = document.getElementById('bodyFlip');
+  if (bodyEl) {
+    if (s.edge && s.edge !== 'none') {
+      const flip = s.edge === 'right' ? 'scaleX(-1)' : '';
+      const tilt = s.climbDir > 0 ? ' rotate(6deg)' : ' rotate(-6deg)';
+      bodyEl.style.transform = flip + tilt;
+    } else {
+      bodyEl.style.transform = s.facing < 0 ? 'scaleX(-1)' : '';
+    }
   }
   // 睡觉时显示 Z
   zzz.hidden = s.state !== 'sleep';

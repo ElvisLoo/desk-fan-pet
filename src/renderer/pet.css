@@ -25,6 +25,12 @@ body.dragging { cursor: grabbing; }
 }
 
 /* ---------- 身体 ---------- */
+.body-flip {
+  /* 朝向层：只承载 scaleX(-1) / rotate，不参与任何 keyframes 动画。
+     动画在内层 .body 上，两层分开，避免 transform 互相覆盖。 */
+  transform-origin: 50% 92%;
+  will-change: transform;
+}
 .body {
   position: relative;
   width: 108px; height: 122px;
